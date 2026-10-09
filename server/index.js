@@ -3,6 +3,7 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import fs from 'fs';
+import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { runAgyAgent } from './agent-bridge.js';
@@ -58,6 +59,60 @@ app.post('/api/reset-session', (req, res) => {
   activeConversationId = null;
   res.json({ success: true, message: 'Sessão reiniciada com sucesso' });
 });
+
+// Audio transcription endpoint (Universal fallback using python/ffmpeg)
+app.post(
+  '/api/transcribe',
+  express.raw({
+    type: ['audio/*', 'application/octet-stream', 'video/webm'],
+    limit: '30mb',
+  }),
+  (req, res) => {
+    try {
+      if (!req.body || req.body.length === 0) {
+        return res.status(400).json({ error: 'Nenhum áudio recebido' });
+      }
+
+      const lang = req.query.lang || 'pt-BR';
+      const tmpFile = path.join('/tmp', `perssua_rec_${Date.now()}.webm`);
+      fs.writeFileSync(tmpFile, req.body);
+
+      const scriptPath = path.resolve(__dirname, 'transcribe.py');
+      const child = spawn('python3', [scriptPath, tmpFile, lang]);
+
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', (d) => {
+        stdout += d.toString();
+      });
+      child.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
+
+      child.on('close', (code) => {
+        try {
+          if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+        } catch {}
+
+        try {
+          const parsed = JSON.parse(stdout.trim());
+          console.log(`[Transcribe] Result:`, parsed);
+          return res.json(parsed);
+        } catch (e) {
+          console.warn('[Transcribe Error]:', stderr || stdout);
+          return res.status(500).json({
+            error: 'Falha ao transcrever áudio',
+            details: stderr || stdout,
+          });
+        }
+      });
+    } catch (err) {
+      console.error('[Transcribe Exception]:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+);
 
 // REST Fallback for sending a prompt
 app.post('/api/message', (req, res) => {

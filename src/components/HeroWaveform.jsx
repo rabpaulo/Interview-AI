@@ -12,6 +12,7 @@ const ROTATING_TEXTS = [
 export function HeroWaveform({
   isListening,
   isProcessing,
+  isTranscribing,
   toggleListening,
   frequencyBars,
   isPushToTalkActive,
@@ -89,6 +90,8 @@ export function HeroWaveform({
                 className={`w-2.5 h-2.5 rounded-full ${
                   isListening
                     ? 'bg-emerald-400 animate-ping'
+                    : isTranscribing
+                    ? 'bg-amber-400 animate-pulse'
                     : isProcessing
                     ? 'bg-cyan-400 animate-pulse'
                     : 'bg-zinc-600'
@@ -99,8 +102,10 @@ export function HeroWaveform({
                   ? isPushToTalkActive
                     ? 'Escutando (Push-To-Talk)...'
                     : 'Escutando sua voz...'
+                  : isTranscribing
+                  ? 'Processando áudio com IA...'
                   : isProcessing
-                  ? 'Agente Antigravity processando...'
+                  ? 'Agente Antigravity executando...'
                   : 'Aguardando comando de voz'}
               </span>
             </div>

@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
+import { AlertCircle, X, RefreshCw } from 'lucide-react';
 import { Navbar } from './components/Navbar.jsx';
 import { HeroWaveform } from './components/HeroWaveform.jsx';
 import { AudioMeters } from './components/AudioMeters.jsx';
 import { TranscriptFeed } from './components/TranscriptFeed.jsx';
 import { AudioControls } from './components/AudioControls.jsx';
 import { FloatingHud } from './components/FloatingHud.jsx';
-import { useAudioEngine } from './hooks/useAudioEngine.js';
-import { useSpeechRecognition } from './hooks/useSpeechRecognition.js';
+import { useVoiceCopilot } from './hooks/useVoiceCopilot.js';
 import { useAgentSocket } from './hooks/useAgentSocket.js';
 
 export default function App() {
@@ -34,19 +34,23 @@ export default function App() {
     [sendMessage]
   );
 
-  // Speech Recognition hook
+  // Unified Voice Copilot hook (Microphone, Web Audio, MediaRecorder & Web Speech)
   const {
     isListening,
+    isTranscribing,
     interimTranscript,
+    audioLevel,
+    frequencyBars,
+    micPermission,
+    errorMessage,
+    clearError,
     isPushToTalkActive,
     toggleListening,
-  } = useSpeechRecognition({
+    startRecording,
+  } = useVoiceCopilot({
     language,
     onFinalTranscript: handleFinalTranscript,
   });
-
-  // Web Audio engine for real-time waveform bars and volume level
-  const { audioLevel, frequencyBars } = useAudioEngine(isListening);
 
   const lastMessage = messages[messages.length - 1];
 
@@ -64,6 +68,30 @@ export default function App() {
         setLanguage={setLanguage}
       />
 
+      {/* Mic Error or Permission Banner */}
+      {errorMessage && (
+        <div className="bg-rose-500/10 border-b border-rose-500/25 px-4 py-2.5 flex items-center justify-between text-xs text-rose-300">
+          <div className="flex items-center gap-2 max-w-4xl mx-auto">
+            <AlertCircle size={15} className="text-rose-400 shrink-0" />
+            <span>{errorMessage}</span>
+            {micPermission === 'denied' && (
+              <button
+                onClick={startRecording}
+                className="ml-2 underline font-semibold hover:text-white cursor-pointer flex items-center gap-1"
+              >
+                <RefreshCw size={12} /> Tentar novamente
+              </button>
+            )}
+          </div>
+          <button
+            onClick={clearError}
+            className="p-1 hover:bg-rose-500/20 rounded transition text-rose-300 hover:text-white cursor-pointer"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Main Content Dashboard */}
       {viewMode === 'full' ? (
         <main className="flex-1 flex flex-col">
@@ -71,6 +99,7 @@ export default function App() {
           <HeroWaveform
             isListening={isListening}
             isProcessing={isProcessing}
+            isTranscribing={isTranscribing}
             toggleListening={toggleListening}
             frequencyBars={frequencyBars}
             isPushToTalkActive={isPushToTalkActive}
