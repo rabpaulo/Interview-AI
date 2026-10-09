@@ -1,6 +1,7 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, session } = require('electron');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 const { spawn } = require('child_process');
 
 let mainWindow = null;
@@ -67,6 +68,8 @@ function createWindow() {
   const defaultX = Math.round(workArea.x + workArea.width - windowWidth - 28);
   const defaultY = Math.round(workArea.y + 40);
 
+  const iconPath = path.join(__dirname, '../build/icon.png');
+
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -78,6 +81,7 @@ function createWindow() {
     maxHeight: 1000,
     backgroundColor: '#0c0c11',
     title: 'Perssua AI Copilot',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     autoHideMenuBar: true,
     frame: false, // frameless for sleek floating widget with custom draggable header
     transparent: false,
@@ -101,6 +105,18 @@ function createWindow() {
 
   // Load URL with automatic retry until server is live
   const loadTargetUrl = () => {
+    if (app.isPackaged) {
+      const reqBackend = http.get('http://localhost:3001', (res) => {
+        res.resume();
+        console.log('[Electron] Loading from Backend server http://localhost:3001');
+        mainWindow.loadURL('http://localhost:3001');
+      });
+      reqBackend.on('error', () => {
+        setTimeout(loadTargetUrl, 300);
+      });
+      return;
+    }
+
     const reqVite = http.get(devRendererUrl, (res) => {
       res.resume();
       console.log(`[Electron] Loading from Vite dev server ${devRendererUrl}`);

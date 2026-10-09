@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.perssua.codecopilot",
+  "productName": "Perssua AI Copilot",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "server/**/*",
+    "shared/**/*",
+    "build/icon.png",
+    "!**/*.test.js",
+    "!server/fixtures/**/*",
+    "package.json"
+  ],
+  "asar": false,
+  "linux": {
+    "target": [
+      {
+        "target": "appimage",
+        "arch": ["x64"]
+      }
+    ],
+    "category": "Development",
+    "icon": "build/icon.png",
+    "synopsis": "Perssua AI Meeting & Voice Copilot",
+    "description": "Perssua AI Meeting & Voice Copilot tailored for coding agents (Antigravity)",
+    "syncDesktopName": true
+  }
+}

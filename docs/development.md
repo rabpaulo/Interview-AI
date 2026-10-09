@@ -32,17 +32,20 @@ command -v agy codex
 | npm start | Inicia Vite, Electron e o backend local. |
 | npm run dev | Mesmo fluxo de npm start, com atualização do frontend pelo Vite. |
 | npm run build | Gera os arquivos do frontend em dist/. |
+| npm run build:appimage | Compila o frontend e empacota o executável AppImage em release/. |
+| npm run pack | Empacota os binários do Electron descompactados em release/linux-unpacked. |
 | npm run desktop | Abre o Electron; usa Vite se disponível, senão o frontend servido pelo backend. |
 | npm test | Executa os testes offline de áudio, sessões, backend e interface. |
 
-Para abrir o frontend compilado, encerre o Vite antes de executar:
+Para gerar e testar o AppImage independente:
 
 ```bash
-npm run build
-npm run desktop
+npm run build:appimage
+# ou:
+./scripts/build-appimage.sh
 ```
 
-O build não gera um instalador desktop. O Electron continua executando a partir do checkout com suas dependências instaladas.
+O AppImage gerado em `release/` inclui o frontend compilado, o backend Express/WebSocket e as dependências de produção para execução sem precisar do servidor de desenvolvimento ativo.
 
 O Vite começa na porta 5173 e escolhe outra se ela estiver ocupada. O script passa a URL efetiva ao Electron. O backend usa a porta 3001 no fluxo desktop; se já houver um backend respondendo nessa porta, ele será reaproveitado.
 

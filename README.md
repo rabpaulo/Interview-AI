@@ -48,6 +48,23 @@ O `contexto.md` é local e está no `.gitignore`; não acompanha o clone. Import
 
 O fim da fala é detectado por uma pausa de aproximadamente 900 ms. Isso pode dividir uma pergunta com pausas longas. A latência também depende da transcrição e do modelo; não há garantia de resposta instantânea.
 
+## Gerar AppImage
+
+Para gerar o pacote executável portátil `.AppImage` (Linux x64):
+
+```bash
+npm run build:appimage
+# ou execute o script auxiliar:
+./scripts/build-appimage.sh
+```
+
+O arquivo executável será gerado no diretório `release/`:
+
+```bash
+chmod +x "release/Perssua AI Copilot-1.0.0.AppImage"
+./release/Perssua\ AI\ Copilot-1.0.0.AppImage
+```
+
 ## Documentação
 
 - [Uso, contexto pessoal e atalhos](docs/usage.md)
