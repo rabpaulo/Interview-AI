@@ -17,15 +17,25 @@ export function useAgentSocket() {
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // When running with Vite proxy or directly on port 3001
-    const wsUrl = `${protocol}//${window.location.hostname}:3001`;
+    let wsUrl = `${protocol}//${window.location.hostname}:3001`;
+    if (window.location.port === '3001') {
+      wsUrl = `${protocol}//${window.location.host}`;
+    }
 
     console.log('[WS Hook] Connecting to:', wsUrl);
-    const ws = new WebSocket(wsUrl);
+    let ws;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      console.warn('[WS Hook] Failed to create WebSocket:', e);
+      reconnectTimeoutRef.current = setTimeout(connect, 2000);
+      return;
+    }
+
     socketRef.current = ws;
 
     ws.onopen = () => {
-      console.log('[WS Hook] Connected');
+      console.log('[WS Hook] Connected successfully to', wsUrl);
       setIsConnected(true);
     };
 
@@ -41,12 +51,15 @@ export function useAgentSocket() {
     ws.onclose = () => {
       console.warn('[WS Hook] Disconnected. Reconnecting in 2s...');
       setIsConnected(false);
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = setTimeout(connect, 2000);
     };
 
     ws.onerror = (err) => {
       console.error('[WS Hook] Socket error:', err);
-      ws.close();
+      try {
+        ws.close();
+      } catch {}
     };
   }, []);
 
@@ -214,17 +227,76 @@ export function useAgentSocket() {
   }, [connect]);
 
   const sendMessage = useCallback((text, source = 'voice') => {
-    if (!text?.trim()) return;
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({
           type: 'voice_message',
-          text: text.trim(),
+          text: trimmed,
           source,
         })
       );
     } else {
-      console.error('[WS Hook] Cannot send message, socket not connected');
+      console.warn('[WS Hook] WebSocket not open, falling back to HTTP /api/message...');
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          text: trimmed,
+          timestamp: Date.now(),
+          source,
+        },
+        {
+          id: `agent-${Date.now()}`,
+          role: 'agent',
+          text: '',
+          status: 'streaming',
+          timestamp: Date.now(),
+          tools: [],
+        },
+      ]);
+      setIsProcessing(true);
+
+      fetch('/api/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: trimmed, source }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          setIsProcessing(false);
+          setMessages((prev) => {
+            const next = [...prev];
+            const lastIdx = next.length - 1;
+            if (next[lastIdx]?.role === 'agent') {
+              next[lastIdx] = {
+                ...next[lastIdx],
+                text: data.response || 'Comando executado.',
+                status: 'done',
+              };
+            }
+            return next;
+          });
+        })
+        .catch((err) => {
+          console.error('[HTTP Fallback Error]:', err);
+          setIsProcessing(false);
+          setMessages((prev) => {
+            const next = [...prev];
+            const lastIdx = next.length - 1;
+            if (next[lastIdx]?.role === 'agent') {
+              next[lastIdx] = {
+                ...next[lastIdx],
+                text: `Erro ao comunicar com o servidor: ${err.message}`,
+                status: 'error',
+              };
+            }
+            return next;
+          });
+        });
     }
   }, []);
 

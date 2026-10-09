@@ -3,13 +3,31 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { runAgyAgent } from './agent-bridge.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distPath = path.resolve(__dirname, '../dist');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// Log every HTTP request
+app.use((req, res, next) => {
+  console.log(`[HTTP ${req.method}] ${req.url}`);
+  next();
+});
+
+// Serve frontend static build if dist exists
+if (fs.existsSync(distPath)) {
+  console.log(`[Server] Serving static frontend from ${distPath}`);
+  app.use(express.static(distPath));
+}
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -38,12 +56,64 @@ app.post('/api/reset-session', (req, res) => {
     activeAgentProcess = null;
   }
   activeConversationId = null;
-  res.json({ success: true, message: 'Session reset' });
+  res.json({ success: true, message: 'Sessão reiniciada com sucesso' });
 });
 
+// REST Fallback for sending a prompt
+app.post('/api/message', (req, res) => {
+  const { text, source } = req.body;
+  if (!text?.trim()) {
+    return res.status(400).json({ error: 'Mensagem vazia' });
+  }
+
+  if (activeAgentProcess) {
+    activeAgentProcess.kill();
+    activeAgentProcess = null;
+  }
+
+  let finalResponse = '';
+  activeAgentProcess = runAgyAgent({
+    prompt: text.trim(),
+    conversationId: activeConversationId,
+    cwd: process.cwd(),
+    onMessage: (eventData) => {
+      if (eventData.result?.response) {
+        finalResponse = eventData.result.response;
+      }
+      if (eventData.conversation_id) {
+        activeConversationId = eventData.conversation_id;
+      }
+    },
+    onError: (err) => {
+      activeAgentProcess = null;
+      res.status(500).json({ error: err.message });
+    },
+    onClose: (code) => {
+      activeAgentProcess = null;
+      res.json({
+        success: true,
+        response: finalResponse,
+        code,
+        conversationId: activeConversationId,
+      });
+    },
+  });
+});
+
+// Catch-all route to serve SPA index.html
+if (fs.existsSync(distPath)) {
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/ws')) {
+      return res.sendFile(path.join(distPath, 'index.html'));
+    }
+    next();
+  });
+}
+
 // WebSocket connection handling
-wss.on('connection', (ws) => {
-  console.log('[WS] Client connected');
+wss.on('connection', (ws, req) => {
+  const clientIp = req.socket.remoteAddress;
+  console.log(`[WS] Client connected from ${clientIp} on path ${req.url}`);
 
   // Send current status on connect
   ws.send(
@@ -61,6 +131,10 @@ wss.on('connection', (ws) => {
     } catch (err) {
       console.error('[WS] Invalid JSON message:', err);
     }
+  });
+
+  ws.on('error', (err) => {
+    console.error('[WS] Client connection error:', err);
   });
 
   ws.on('close', () => {
@@ -108,7 +182,6 @@ function handleClientMessage(ws, data) {
       conversationId: activeConversationId,
       cwd: process.cwd(),
       onMessage: (eventData) => {
-        // Track conversation_id if emitted
         if (eventData.conversation_id) {
           activeConversationId = eventData.conversation_id;
         }
@@ -119,7 +192,6 @@ function handleClientMessage(ws, data) {
           activeConversationId = eventData.result.conversation_id;
         }
 
-        // Send streaming event to frontend
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify({
@@ -165,7 +237,7 @@ function handleClientMessage(ws, data) {
   }
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`[Perssua Code Server] Running on http://localhost:${PORT}`);
   console.log(`[Perssua Code Server] WebSocket ready on ws://localhost:${PORT}`);
 });
