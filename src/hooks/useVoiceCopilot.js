@@ -1,4 +1,28 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { startMicrophoneTranscription } from '../audio/microphone-transcription.js';
+
+function stopRecognitionAndWait(recognition, timeoutMs = 800) {
+  if (!recognition) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeoutId;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve();
+    };
+    timeoutId = setTimeout(finish, timeoutMs);
+
+    recognition.onend = finish;
+    try {
+      recognition.stop();
+    } catch {
+      finish();
+    }
+  });
+}
 
 /**
  * Unified Voice Copilot Hook
@@ -6,7 +30,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
  * 1. Web Audio API (live decibels & waveform frequencies)
  * 2. MediaRecorder (high-fidelity audio recording across ALL browsers)
  * 3. Web Speech API (instant interim preview if available)
- * 4. Automatic backend /api/transcribe fallback if Web Speech is unavailable
+ * 4. Incremental PCM transcription during capture, with full-recording fallback
  * 5. Spacebar Push-To-Talk
  */
 export function useVoiceCopilot({
@@ -35,6 +59,17 @@ export function useVoiceCopilot({
   const recognitionRef = useRef(null);
   const speechRecognizedTextRef = useRef('');
   const isListeningRef = useRef(false);
+  const startingRef = useRef(false);
+  const recordingGenerationRef = useRef(0);
+  const microphoneTranscriptionRef = useRef(null);
+  const finishingTranscriptionRef = useRef(null);
+  const fallbackControllerRef = useRef(null);
+  const mountedRef = useRef(true);
+  const onFinalTranscriptRef = useRef(onFinalTranscript);
+
+  useEffect(() => {
+    onFinalTranscriptRef.current = onFinalTranscript;
+  }, [onFinalTranscript]);
 
   // Initialize Microphone & Web Audio Analyzer
   const getOrCreateStream = useCallback(async () => {
@@ -44,7 +79,7 @@ export function useVoiceCopilot({
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Seu navegador não suporta captura de áudio (getUserMedia).');
+        throw new Error('Dispositivo de áudio não disponível para captura.');
       }
 
       console.log('[VoiceCopilot] Requesting microphone permission...');
@@ -78,7 +113,7 @@ export function useVoiceCopilot({
       console.error('[VoiceCopilot] Mic permission error:', err);
       setMicPermission('denied');
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setErrorMessage('Permissão do microfone negada. Clique no ícone de cadeado do navegador para permitir.');
+        setErrorMessage('Permissão do microfone negada nas configurações do sistema.');
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         setErrorMessage('Nenhum microfone encontrado conectado ao computador.');
       } else {
@@ -144,28 +179,64 @@ export function useVoiceCopilot({
 
   // Start recording
   const startRecording = useCallback(async () => {
-    if (isListeningRef.current) return;
-
+    if (isListeningRef.current || startingRef.current) return;
+    startingRef.current = true;
+    const generation = ++recordingGenerationRef.current;
+    microphoneTranscriptionRef.current?.cancel();
+    finishingTranscriptionRef.current?.cancel();
+    finishingTranscriptionRef.current = null;
+    fallbackControllerRef.current?.abort();
+    if (recognitionRef.current) {
+      const recognition = recognitionRef.current;
+      recognitionRef.current = null;
+      try { recognition.abort(); } catch {}
+    }
+    mediaRecorderRef.current = null;
+    microphoneTranscriptionRef.current = null;
+    setIsTranscribing(false);
     setErrorMessage(null);
     speechRecognizedTextRef.current = '';
     setInterimTranscript('');
     recordedChunksRef.current = [];
 
     const stream = await getOrCreateStream();
+    if (generation !== recordingGenerationRef.current || !mountedRef.current) {
+      startingRef.current = false;
+      return;
+    }
     if (!stream) {
+      startingRef.current = false;
       console.warn('[VoiceCopilot] Could not start recording without audio stream');
       return;
     }
 
     if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume();
+      await audioContextRef.current.resume();
     }
 
+    if (generation !== recordingGenerationRef.current || !mountedRef.current) {
+      startingRef.current = false;
+      return;
+    }
+    startingRef.current = false;
     isListeningRef.current = true;
     setIsListening(true);
     startVisualizer();
 
+    // Start PCM transcription independently of the backup recorder. Capturing
+    // generation prevents late worklet setup/results from leaking into a new turn.
+    startMicrophoneTranscription(audioContextRef.current, stream, {
+      language,
+      onPartial: (text) => {
+        if (mountedRef.current && generation === recordingGenerationRef.current) setInterimTranscript(text);
+      },
+    }).then((session) => {
+      if (!isListeningRef.current || generation !== recordingGenerationRef.current || !mountedRef.current) session.cancel();
+      else microphoneTranscriptionRef.current = session;
+    }).catch((error) => console.warn('[VoiceCopilot] PCM capture unavailable; using fallback:', error.message));
+
     // 1. Start MediaRecorder
+    const chunks = recordedChunksRef.current;
     try {
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
@@ -180,7 +251,7 @@ export function useVoiceCopilot({
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
-          recordedChunksRef.current.push(event.data);
+          chunks.push(event.data);
         }
       };
 
@@ -195,7 +266,9 @@ export function useVoiceCopilot({
     if (SpeechRecognition) {
       try {
         if (recognitionRef.current) {
-          try { recognitionRef.current.abort(); } catch {}
+          const previousRecognition = recognitionRef.current;
+          recognitionRef.current = null;
+          try { previousRecognition.abort(); } catch {}
         }
 
         const recognition = new SpeechRecognition();
@@ -204,6 +277,8 @@ export function useVoiceCopilot({
         recognition.lang = language;
 
         recognition.onresult = (event) => {
+          if (recognitionRef.current !== recognition) return;
+
           let interim = '';
           let final = '';
 
@@ -216,10 +291,10 @@ export function useVoiceCopilot({
             }
           }
 
-          if (interim) setInterimTranscript(interim);
+          if (interim && !microphoneTranscriptionRef.current) setInterimTranscript(`${speechRecognizedTextRef.current} ${interim}`.trim());
           if (final) {
             speechRecognizedTextRef.current += ' ' + final;
-            setInterimTranscript(speechRecognizedTextRef.current.trim());
+            if (!microphoneTranscriptionRef.current) setInterimTranscript(speechRecognizedTextRef.current.trim());
           }
         };
 
@@ -227,9 +302,10 @@ export function useVoiceCopilot({
           console.warn('[VoiceCopilot] SpeechRecognition event error:', event.error);
         };
 
-        recognition.start();
         recognitionRef.current = recognition;
+        recognition.start();
       } catch (err) {
+        recognitionRef.current = null;
         console.warn('[VoiceCopilot] Could not start browser SpeechRecognition:', err);
       }
     }
@@ -237,8 +313,18 @@ export function useVoiceCopilot({
 
   // Stop recording and process transcript
   const stopRecording = useCallback(async () => {
-    if (!isListeningRef.current) return;
-
+    if (!isListeningRef.current) {
+      if (startingRef.current) ++recordingGenerationRef.current;
+      return;
+    }
+    const generation = recordingGenerationRef.current;
+    const isCurrent = () => mountedRef.current && generation === recordingGenerationRef.current;
+    const chunks = recordedChunksRef.current;
+    const pcmSession = microphoneTranscriptionRef.current;
+    finishingTranscriptionRef.current = pcmSession;
+    microphoneTranscriptionRef.current = null;
+    const incrementalResult = pcmSession ? pcmSession.finish() : Promise.resolve(null);
+    if (pcmSession) setIsTranscribing(true);
     isListeningRef.current = false;
     setIsListening(false);
     setAudioLevel(0);
@@ -248,61 +334,75 @@ export function useVoiceCopilot({
       cancelAnimationFrame(animationFrameRef.current);
     }
 
-    // Stop Web Speech API
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-    }
+    // Give Web Speech a moment to deliver its final result after stop().
+    const recognition = recognitionRef.current;
+    const recognitionFinalization = stopRecognitionAndWait(recognition);
 
     // Stop MediaRecorder and handle audio blob
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
       recorder.onstop = async () => {
+        const [streamed] = await Promise.all([incrementalResult, recognitionFinalization]);
+        if (!isCurrent()) return;
+        finishingTranscriptionRef.current = null;
+        setIsTranscribing(false);
+        if (recognitionRef.current === recognition) recognitionRef.current = null;
+        if (streamed?.text) {
+          onFinalTranscriptRef.current?.(streamed.text);
+          setInterimTranscript('');
+          speechRecognizedTextRef.current = '';
+          return;
+        }
+
         const browserText = speechRecognizedTextRef.current.trim();
-        const interimText = interimTranscript.trim();
-        const finalCandidate = browserText || interimText;
 
         // If Web Speech API captured text successfully, use it!
-        if (finalCandidate) {
-          console.log('[VoiceCopilot] Using browser Web Speech transcript:', finalCandidate);
-          onFinalTranscript?.(finalCandidate);
+        if (browserText) {
+          console.log('[VoiceCopilot] Using browser Web Speech transcript:', browserText);
+          onFinalTranscriptRef.current?.(browserText);
           setInterimTranscript('');
           speechRecognizedTextRef.current = '';
           return;
         }
 
         // Otherwise, send recorded audio blob to backend /api/transcribe
-        if (recordedChunksRef.current.length > 0) {
+        if (chunks.length > 0) {
           try {
             setIsTranscribing(true);
             setInterimTranscript('Transcrevendo áudio com o servidor...');
 
-            const blob = new Blob(recordedChunksRef.current, {
+            const blob = new Blob(chunks, {
               type: recorder.mimeType || 'audio/webm',
             });
 
             console.log(`[VoiceCopilot] Sending audio blob (${blob.size} bytes) to /api/transcribe...`);
 
+            const controller = new AbortController();
+            fallbackControllerRef.current = controller;
             const res = await fetch(`/api/transcribe?lang=${encodeURIComponent(language)}`, {
               method: 'POST',
               headers: {
                 'Content-Type': blob.type || 'audio/webm',
               },
               body: blob,
+              signal: controller.signal,
             });
 
             const data = await res.json();
+            if (!isCurrent()) return;
             setIsTranscribing(false);
             setInterimTranscript('');
 
             if (data.text?.trim()) {
               console.log('[VoiceCopilot] Server transcribed:', data.text);
-              onFinalTranscript?.(data.text.trim());
+              onFinalTranscriptRef.current?.(data.text.trim());
             } else if (data.error) {
               console.warn('[VoiceCopilot] Transcribe error:', data.error);
               setErrorMessage(`Transcrição: ${data.error}`);
               setTimeout(() => setErrorMessage(null), 4000);
             }
           } catch (err) {
+            if (!isCurrent()) return;
             console.error('[VoiceCopilot] Server transcribe fetch error:', err);
             setIsTranscribing(false);
             setInterimTranscript('');
@@ -318,15 +418,44 @@ export function useVoiceCopilot({
         console.error('Error stopping recorder:', e);
       }
     } else {
-      // Fallback if recorder was not active
-      const text = speechRecognizedTextRef.current.trim() || interimTranscript.trim();
+      // Fallback if the recorder was not active. Interim hypotheses are never
+      // submitted as final speech.
+      const [streamed] = await Promise.all([incrementalResult, recognitionFinalization]);
+      if (!isCurrent()) return;
+      finishingTranscriptionRef.current = null;
+      setIsTranscribing(false);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
+
+      const text = streamed?.text || speechRecognizedTextRef.current.trim();
       if (text) {
-        onFinalTranscript?.(text);
+        onFinalTranscriptRef.current?.(text);
         setInterimTranscript('');
         speechRecognizedTextRef.current = '';
       }
     }
-  }, [interimTranscript, language, onFinalTranscript]);
+  }, [language]);
+
+  const cancelRecording = useCallback(() => {
+    ++recordingGenerationRef.current;
+    isListeningRef.current = false;
+    microphoneTranscriptionRef.current?.cancel();
+    finishingTranscriptionRef.current?.cancel();
+    microphoneTranscriptionRef.current = null;
+    finishingTranscriptionRef.current = null;
+    fallbackControllerRef.current?.abort();
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    try { recognition?.abort(); } catch {}
+    const recorder = mediaRecorderRef.current;
+    if (recorder?.state === 'recording') recorder.stop();
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    setIsListening(false);
+    setIsTranscribing(false);
+    setInterimTranscript('');
+    setAudioLevel(0);
+    setFrequencyBars(Array(48).fill(12));
+    setIsPushToTalkActive(false);
+  }, []);
 
   const toggleListening = useCallback(() => {
     if (isListening) {
@@ -372,7 +501,17 @@ export function useVoiceCopilot({
 
   // Cleanup on unmount
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      ++recordingGenerationRef.current;
+      isListeningRef.current = false;
+      microphoneTranscriptionRef.current?.cancel();
+      finishingTranscriptionRef.current?.cancel();
+      fallbackControllerRef.current?.abort();
+      recognitionRef.current?.abort();
+      if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       }
@@ -395,5 +534,6 @@ export function useVoiceCopilot({
     toggleListening,
     startRecording,
     stopRecording,
+    cancelRecording,
   };
 }

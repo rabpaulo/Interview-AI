@@ -1,58 +1,69 @@
-# Perssua Code Copilot 🎙️⚡
+# Perssua Code Copilot 🎙️⚡ (Aplicativo Desktop)
 
-> Clone do [Perssua](https://perssua.com/pt) adaptado para agentes de código autônomos (**Google Antigravity / DeepMind Gemini**).
+> Aplicativo de desktop nativo (Electron) inspirado no [Perssua](https://perssua.com/pt) adaptado para agentes de programação autônomos (**Google Antigravity / DeepMind Gemini / Codex**).
 
-O **Perssua Code** permite que você converse com o seu agente de programação por voz em tempo real: ele captura sua fala, exibe uma waveform animada com medidores de decibéis, transcreve com latência mínima e despacha os comandos diretamente para o **Antigravity CLI (`agy`)**, exibindo as respostas, códigos e execuções na tela instantaneamente.
+O **Perssua Code** funciona como um widget flutuante de desktop que fica sempre visível no canto da sua tela: ele captura áudio do seu microfone e do sistema (reuniões/calls do PC via loopback PipeWire/PulseAudio), transcreve em tempo real e fornece respostas ideais ("Diga isso") e execuções de comandos de código via **Antigravity CLI (`agy`)**.
 
 ---
 
-## ✨ Funcionalidades
+## ✨ Funcionalidades do Aplicativo Desktop
 
-- 🌊 **Waveform e Medidores Estilo Perssua**:
-  - Visualizador de espectro sonoro com barras dinâmicas sincronizadas ao microfone via **Web Audio API**.
-  - Medidores duplos de áudio: canal **VOCÊ** (nível de captação) e canal **AGENTE** (processamento do Antigravity).
-  - Timer de gravação ao vivo (`00:15`) com indicador pulsante de status (*Escutando...* / *Processando...*).
+- 🪟 **Janela Flutuante Compacta & Frameless (Electron)**:
+  - Widget nativo minimalista e compacto (~440px) no canto da sua área de trabalho.
+  - Fixação no topo (**Always-on-Top**) com um clique ou atalho, ideal para reuniões, entrevistas técnicas ou pair-programming.
+  - Controles nativos de janela (minimizar, fechar, fixar) e cabeçalho arrastável (*draggable header*).
+  - Cabeçalho estilo *Notch* com cronômetro da sessão, status em tempo real e seletor rápido de modelo de IA.
 
-- 🎙️ **Reconhecimento de Voz em Tempo Real**:
-  - Reconhecimento contínuo e streaming de transcrição em **Português (`pt-BR`)** e **Inglês (`en-US`)**.
-  - **Push-to-Talk**: Segure a barra de espaço (<kbd>ESPAÇO</kbd>) para falar rapidamente e solte para despachar o comando.
-  - Detecção inteligente de pausa e despacho automático.
+- 🎙️ **Captura de Áudio Dupla (Microfone + Loopback do PC)**:
+  - Captura direta do microfone do usuário e áudio do sistema (outros participantes em reuniões/calls).
+  - Medidores visuais de decibéis em tempo real (**VOCÊ**, **PC CALL** e **AGENTE**).
+  - **Push-to-Talk**: Pressione e segure <kbd>ESPAÇO</kbd> para falar comandos rápidos.
+  - **Transcrição durante a fala**: o PC envia seu primeiro WAV com 2 segundos de áudio; os seguintes e os do microfone usam janelas de aproximadamente 3 segundos, com 800 ms de sobreposição. No PC, os trechos reconhecidos aparecem ao vivo na transcrição; o modo automático só chama a IA depois de consolidar a fala, para não responder a perguntas incompletas. A transcrição final é consolidada após 900 ms de pausa no PC ou ao soltar/parar o microfone.
+  - A primeira parcial depende da janela inicial de áudio e do tempo de resposta do serviço. Trechos são processados em ordem, com fila limitada e cancelamento ao parar a captura/reiniciar a sessão. A transcrição é incremental por blocos, usa internet e não precisa de uma nova chave de API.
+  - Se uma divisão curta não for entendida, o app amplia o contexto com o trecho vizinho (até 10 segundos), removendo a sobreposição de áudio. Só informa falha de reconhecimento se a recuperação também não conseguir transcrever; erros de conexão continuam sendo informados imediatamente.
+  - As respostas automáticas usam um único pedido por vez e recebem apenas a transcrição consolidada. Quando o modelo fica atrasado, a fala completa mais recente substitui respostas antigas ainda não geradas, preservando as transcrições no histórico. Encher a fila não reinicia o agente ativo. Trechos parciais não consomem pedidos de IA.
+  - Durante uma pausa no PC, o reconhecimento do trecho final pode começar após 300 ms de silêncio. Os 900 ms consolidam a frase e a sugestão final.
 
-- 🤖 **Integração Nativa com o Antigravity (`agy`)**:
-  - Comunica-se diretamente com o CLI instalado (`~/.local/bin/agy`).
-  - Suporte a streaming de tokens em tempo real (**NDJSON** / `stream-json`).
-  - Mantém o contexto de conversa ativo do projeto (`--continue`).
-  - Acompanhamento de ações de ferramentas (*tool calls*, leitura e escrita de arquivos).
+- ⚡ **Atalhos Globais de Teclado**:
+  - <kbd>Alt+Space</kbd> ou <kbd>Ctrl+D</kbd>: Dispara o copiloto ("Diga isso") imediatamente para a última fala.
+  - <kbd>Ctrl+B</kbd>: Oculta / exibe a janela do aplicativo na tela.
+  - <kbd>Alt+Shift+P</kbd>: Alterna a captura de áudio do sistema (PC).
+  - <kbd>Alt+Shift+M</kbd>: Alterna o microfone.
 
-- 🪟 **Modo HUD Flutuante vs. Dashboard**:
-  - **Dashboard Completo**: Visão completa com feed de transcrição ("Você falou" / "Agente respondeu"), abas de sessão e código.
-  - **Modo HUD Flutuante**: Widget compacto tipo *Dynamic Island* para posicionar no canto da tela enquanto você coda no VS Code ou terminal.
+- 📑 **Abas em Tempo Real**:
+  - **Transcrição**: Feed com balões de fala ("Você", "PC / Reunião") e cartões destacados de **Diga isso** com sugestões ideais da IA prontas para copiar.
+  - **Sessão**: Histórico organizado de perguntas e respostas da conversa.
+  - **Resumo**: Síntese executiva dos tópicos e decisões geradas com IA em um clique.
 
-- 💻 **Visualizador de Código com Formatação e Cópia**:
-  - Realce de sintaxe em blocos markdown com botão de cópia com um clique e identificação de linguagem.
+- 🤖 **Integração com Motores de IA**:
+  - Integração nativa com **Antigravity CLI (`agy`)** e **Codex CLI**.
+  - Streaming de tokens em tempo real com blocos de código formatados.
+  - Suporte a modelos como Gemini 3.8 Flash (High), Gemini 3.1 Pro, Fast Mode e níveis de raciocínio.
+  - Ao abrir o app ou iniciar uma nova sessão, o agente selecionado já prepara a conversa e fica aguardando a primeira pergunta. Antigravity e Codex mantêm o processo aberto entre pedidos; o Codex usa uma thread persistente via `app-server`. A preparação não envia prompts. [Medições e limites da otimização](docs/response-latency.md).
 
 ---
 
 ## 🚀 Como Executar
 
-### 1. Pré-requisitos
-- Node.js 18+ (testado no Node.js v26)
-- Antigravity CLI (`agy`) configurado no seu sistema
+### Pré-requisitos
+- **Node.js 18+**
+- **Antigravity CLI (`agy`)** instalado e autenticado no sistema (ex: `~/.local/bin/agy`)
+- PipeWire / PulseAudio (padrão em distribuições Linux para loopback)
+- Python 3 com `SpeechRecognition`, `ffmpeg` e `parec` (normalmente fornecido por `pulseaudio-utils`)
 
-### 2. Instalação e Execução
-Na raiz do projeto:
+### Instalação e Inicialização
 
 ```bash
-# Instalar dependências (caso não tenha instalado)
+# 1. Instalar as dependências
 npm install
 
-# Iniciar servidor backend + cliente frontend em conjunto
-npm run dev
+# 2. Iniciar o aplicativo desktop
+npm start
 ```
 
-Acesse no navegador:
-- **Frontend**: [http://localhost:5173](http://localhost:5173)
-- **Backend API & WebSocket**: `http://localhost:3001` (ws://localhost:3001)
+> **Dica**: `npm run dev` também inicia o aplicativo desktop com recarregamento a quente (HMR).
+
+Se o backend já estiver rodando na porta 3001, a inicialização reaproveita esse processo. Se a porta 5173 estiver ocupada, o Vite escolhe outra porta e o Electron abre o endereço correto. Ao fechar o aplicativo, os processos iniciados por ele são encerrados.
 
 ---
 
@@ -60,37 +71,46 @@ Acesse no navegador:
 
 ```
 happy-hawking/
+├── electron/
+│   ├── main.cjs                  # Processo principal do Electron (janela, atalhos, permissões)
+│   └── preload.cjs               # ContextBridge seguro expondo perssuaDesktop
 ├── server/
-│   ├── index.js              # Servidor Express + WebSocket
-│   ├── agent-bridge.js       # Bridge que executa o `agy` em modo stream-json
-│   └── test-client.js        # Script de teste do pipeline WebSocket
+│   ├── index.js                  # Servidor local Express + WebSocket (porta 3001)
+│   ├── agent-bridge.js           # Bridge de execução do Antigravity CLI (`agy`)
+│   ├── gemini-copilot.js         # Orquestrador do copiloto Gemini em tempo real
+│   ├── system-audio-engine.js    # Captura loopback de áudio do Linux (parec / pw-record)
+│   ├── transcriber.js            # Engine de transcrição de áudio
+│   └── transcribe.py             # Script auxiliar de transcrição
 ├── src/
-│   ├── main.jsx              # Entry point do React
-│   ├── App.jsx               # Componente central e orquestrador
+│   ├── main.jsx                  # Entry point do React
+│   ├── App.jsx                   # Container principal do desktop widget
 │   ├── components/
-│   │   ├── Navbar.jsx        # Barra superior com branding e modo HUD
-│   │   ├── HeroWaveform.jsx  # Hero com waveform animada e microfone central
-│   │   ├── AudioMeters.jsx   # Medidores "VOCÊ" e "AGENTE"
-│   │   ├── TranscriptFeed.jsx# Feed de transcrição ("Você falou" / "Diga isso")
-│   │   ├── FloatingHud.jsx   # Widget flutuante compacto
-│   │   ├── CodeBlock.jsx     # Renderizador de código com cópia
-│   │   └── AudioControls.jsx # Sugestões rápidas e input de texto
-│   └── hooks/
-│       ├── useAudioEngine.js       # Web Audio API (analyser, decibéis, barras)
-│       ├── useSpeechRecognition.js # Web Speech API (pt-BR, push-to-talk)
-│       └── useAgentSocket.js       # Cliente WebSocket com streaming do agy
+│   │   ├── CompactHeader.jsx     # Notch superior com controles de janela e modelo
+│   │   ├── CompactTabs.jsx       # Abas (Transcrição / Sessão / Resumo)
+│   │   ├── CompactTranscriptFeed.jsx # Feed de transcrição com respostas e blocos de código
+│   │   ├── CompactAudioMeters.jsx# Medidores de nível (Você / PC Call / Agente)
+│   │   ├── CompactBottomBar.jsx  # Barra inferior com microfone, botão Diga isso e drawer
+│   │   ├── ModelSelectorModal.jsx# Modal de configuração de modelos e raciocínio
+│   │   └── CodeBlock.jsx         # Renderização de código com syntax highlighting
+│   ├── hooks/
+│   │   ├── useVoiceCopilot.js    # Captura de microfone e transcrição
+│   │   ├── useAgentSocket.js     # Comunicação WebSocket e controle de áudio do PC
+│   │   └── useAgentSettings.js   # Gerenciamento de preferências do modelo
+│   ├── config/
+│   │   └── models.js             # Definições de modelos e configurações
+│   └── index.css                 # Estilos Tailwind e animações
+├── package.json
 └── vite.config.js
 ```
 
 ---
 
-## 💡 Como Usar
+## 💡 Como Usar o Copiloto
 
-1. Abra a aplicação no Chrome, Edge ou navegador compatível com Web Speech API.
-2. Conceda a permissão de microfone quando solicitada.
-3. Clique no botão de microfone central ou segure **`ESPAÇO`**.
-4. Fale um comando em voz alta, como:
-   - *"Liste os arquivos desse projeto"*
-   - *"Crie uma função em Python para calcular números primos"*
-   - *"Explique como funciona a arquitetura do servidor"*
-5. Observe a transcrição em tempo real na tela e a resposta imediata gerada pelo Antigravity Code Agent.
+Antes de uma entrevista, abra **Meu contexto** pelo ícone de pessoa na barra inferior. Escolha **Carregar contexto.md** para ler o arquivo na raiz do projeto, ou **Criar do zero** para escrever um novo texto. Revise e clique em **Salvar contexto** para aplicar; cancelar mantém o contexto anterior e não modifica o arquivo. Se editar o arquivo depois, carregue novamente. Arquivos vazios ou acima de 6.000 caracteres mostram um aviso sem apagar seu rascunho. Salve sua experiência, projetos, vaga e preferências reais. O texto fica salvo neste dispositivo e acompanha os pedidos do copiloto ao modelo selecionado, inclusive após reiniciar a sessão. Para remover o contexto dos próximos pedidos, apague o campo e salve; conversas anteriores não são apagadas. Sem fatos pessoais disponíveis, o prompt orienta a não inventar uma trajetória nem pedir esses dados ao entrevistador.
+
+1. Inicie o aplicativo com `npm start`.
+2. O aplicativo abrirá em uma janela compacta no canto direito da tela, fixada no topo.
+3. Fale no microfone (clique no ícone ou segure <kbd>ESPAÇO</kbd>) ou deixe a captura de áudio do PC ativa durante uma reunião.
+4. Para obter uma resposta da IA instantaneamente para a última fala ou pergunta ouvida, use o atalho <kbd>Alt+Space</kbd> ou clique em **"Diga isso"**.
+5. Para esconder a janela durante o compartilhamento de tela, aperte <kbd>Ctrl+B</kbd>.
