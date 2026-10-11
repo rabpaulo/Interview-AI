@@ -6,7 +6,7 @@ import path from 'node:path';
 import { transcribeAudioBuffer } from './transcriber.js';
 
 test('a stalled transcriber returns an error and removes temporary audio', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perssua-transcriber-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interviewai-transcriber-test-'));
   const originalPath = process.env.PATH;
   // Record the temporary filename, then simulate a recognition request that hangs.
   fs.writeFileSync(path.join(dir, 'python3'), '#!/usr/bin/env node\n' +

@@ -475,7 +475,8 @@ export function useVoiceCopilot({
         return;
       }
 
-      if (e.code === 'Space' && !e.repeat && !isPushToTalkActive) {
+      // Alt+Space is the mic toggle shortcut, not push-to-talk.
+      if (e.code === 'Space' && !e.altKey && !e.repeat && !isPushToTalkActive) {
         e.preventDefault();
         setIsPushToTalkActive(true);
         startRecording();

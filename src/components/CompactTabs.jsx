@@ -1,7 +1,25 @@
 import React from 'react';
 import { Mic, MessageSquare, FileText, Sparkles } from 'lucide-react';
 
-export function CompactTabs({ activeTab, setActiveTab, countMessages = 0 }) {
+const formatTimer = (totalSec) => {
+  const mins = Math.floor(totalSec / 60).toString().padStart(2, '0');
+  const secs = (totalSec % 60).toString().padStart(2, '0');
+  return `${mins}:${secs}`;
+};
+
+export function CompactTabs({
+  activeTab,
+  setActiveTab,
+  countMessages = 0,
+  isListening,
+  isTranscribing,
+  isProcessing,
+  elapsedSeconds = 0,
+  isDraggable = true,
+}) {
+  const isBusy = isListening || isTranscribing || isProcessing;
+  const statusLabel = isListening ? 'Ouvindo' : isTranscribing ? 'Transcrevendo' : isProcessing ? 'Gerando' : 'Pronto';
+
   const tabs = [
     { id: 'transcription', label: 'Transcrição', icon: Mic },
     { id: 'session', label: 'Sessão', icon: MessageSquare, badge: countMessages > 0 ? countMessages : null },
@@ -9,8 +27,8 @@ export function CompactTabs({ activeTab, setActiveTab, countMessages = 0 }) {
   ];
 
   return (
-    <div className="app-tabs flex items-center justify-between px-4 py-2 select-none">
-      <div className="flex items-center gap-1">
+    <div className={`app-tabs ${isDraggable ? 'app-drag-region' : ''} flex items-center justify-between px-4 py-2 select-none`}>
+      <div className="flex items-center gap-1 app-no-drag">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -41,13 +59,13 @@ export function CompactTabs({ activeTab, setActiveTab, countMessages = 0 }) {
         })}
       </div>
 
-      {/* Perssua live pulse indicator */}
-      <div className="flex items-center gap-1.5 pr-1">
-          <span className="relative flex h-1.5 w-1.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-40" />
-          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-400" />
+      {/* Live status & timer (the tab strip doubles as the window drag handle) */}
+      <div className="flex items-center gap-1.5 pr-1 text-[10px]" title={statusLabel}>
+        <span className="relative flex h-1.5 w-1.5">
+          {isBusy && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-40" />}
+          <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${isBusy ? 'bg-blue-400' : 'bg-zinc-600'}`} />
         </span>
-        <span className="text-[10px] text-zinc-500 font-medium hidden min-[380px]:inline">Ao vivo</span>
+        <span className="font-mono tabular-nums text-zinc-400">{formatTimer(elapsedSeconds)}</span>
       </div>
     </div>
   );

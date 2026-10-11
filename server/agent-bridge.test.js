@@ -6,14 +6,18 @@ import * as bridge from './agent-bridge.js';
 function fixture(t) {
   const previous = process.env.AGY_BIN;
   const previousCodex = process.env.CODEX_BIN;
+  const previousClaude = process.env.CLAUDE_BIN;
   process.env.AGY_BIN = fileURLToPath(new URL('./fixtures/agy-session.cjs', import.meta.url));
   process.env.CODEX_BIN = fileURLToPath(new URL('./fixtures/codex-session.cjs', import.meta.url));
+  process.env.CLAUDE_BIN = fileURLToPath(new URL('./fixtures/claude-session.cjs', import.meta.url));
   t.after(() => {
     bridge.closeAgentSession();
     if (previous === undefined) delete process.env.AGY_BIN;
     else process.env.AGY_BIN = previous;
     if (previousCodex === undefined) delete process.env.CODEX_BIN;
     else process.env.CODEX_BIN = previousCodex;
+    if (previousClaude === undefined) delete process.env.CLAUDE_BIN;
+    else process.env.CLAUDE_BIN = previousClaude;
   });
 }
 
@@ -77,7 +81,7 @@ test('a completed handle cannot cancel a later turn on the warm process', { time
 
 test('spawn failures produce one error and no successful completion', { timeout: 3000 }, async (t) => {
   fixture(t);
-  process.env.AGY_BIN = '/tmp/nonexistent-perssua-test-binary';
+  process.env.AGY_BIN = '/tmp/nonexistent-interviewai-test-binary';
   let errors = 0;
   let completions = 0;
   await new Promise((resolve) => bridge.runAgyAgent({
@@ -115,7 +119,7 @@ test('cancelled Codex runs cannot deliver stale callbacks to the next live respo
   assert.equal(messages.find((message) => message.event === 'result').result.response, 'atual');
 });
 
-for (const provider of ['antigravity', 'codex']) {
+for (const provider of ['antigravity', 'codex', 'claude']) {
   const run = (options) => new Promise((resolve, reject) => {
     const messages = [];
     const handle = bridge.runUnifiedAgent({ provider, ...options,
@@ -181,3 +185,31 @@ for (const prompt of ['__error__', '__exit__', '__rpc_error__']) {
     await new Promise((resolve, reject) => bridge.runCodexAgent({ prompt: 'recuperada', onClose: resolve, onError: reject }));
   });
 }
+
+for (const prompt of ['__error__', '__exit__']) {
+  test(`Claude Code ${prompt}: failed turns emit one error, never complete and allow recovery`, { timeout: 3000 }, async (t) => {
+    fixture(t);
+    t.after(() => bridge.closeAgentSession());
+    let errors = 0;
+    let completions = 0;
+    await new Promise((resolve) => bridge.runClaudeAgent({ prompt,
+      onError: () => { errors++; resolve(); }, onClose: () => completions++,
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(errors, 1);
+    assert.equal(completions, 0);
+    await new Promise((resolve, reject) => bridge.runClaudeAgent({ prompt: 'recuperada', onClose: resolve, onError: reject }));
+  });
+}
+
+test('Claude Code: a prepared but unused session is recreated with its ID instead of resuming', { timeout: 3000 }, async (t) => {
+  fixture(t);
+  t.after(() => bridge.closeAgentSession());
+  const prepared = await bridge.prepareAgentSession({ provider: 'claude', reasoningEffort: 'low' });
+  const messages = [];
+  await new Promise((resolve, reject) => bridge.runClaudeAgent({ prompt: 'depois da troca', reasoningEffort: 'high',
+    conversationId: prepared.conversationId, onMessage: (m) => messages.push(m), onClose: resolve, onError: reject }));
+  const result = messages.find((m) => m.event === 'result').result;
+  assert.equal(result.conversation_id, prepared.conversationId);
+  assert.equal(result.response, 'depois da troca');
+});

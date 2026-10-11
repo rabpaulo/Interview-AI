@@ -1,9 +1,9 @@
 {
-  "name": "perssua-code-copilot",
+  "name": "interviewai",
   "version": "1.0.0",
-  "description": "Perssua AI Meeting & Voice Copilot clone tailored for coding agents (Antigravity)",
-  "author": "Perssua AI",
-  "desktopName": "perssua-code-copilot.desktop",
+  "description": "InterviewAI Meeting & Voice Copilot clone tailored for coding agents (Antigravity)",
+  "author": "InterviewAI",
+  "desktopName": "interviewai.desktop",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -14,7 +14,8 @@
     "build:appimage": "npm run build && electron-builder --linux appimage",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "test": "node --test server/*.test.js shared/*.test.js src/hooks/*.test.js src/components/*.test.js scripts/*.test.js"
+    "test": "node --test server/*.test.js shared/*.test.js src/hooks/*.test.js src/components/*.test.js scripts/*.test.js",
+    "eval:copilot": "node scripts/evaluate-copilot.js"
   },
   "dependencies": {
     "clsx": "^2.1.1",

@@ -2,22 +2,22 @@
 
 :root {
   color-scheme: dark;
-  --perssua-bg: #050506;
-  --perssua-surface: #0b0b0d;
-  --perssua-surface-raised: #111113;
-  --perssua-line: rgba(255, 255, 255, 0.09);
-  --perssua-muted: #8c8c93;
-  --perssua-blue: #2684ff;
+  --interviewai-bg: #050506;
+  --interviewai-surface: #0b0b0d;
+  --interviewai-surface-raised: #111113;
+  --interviewai-line: rgba(255, 255, 255, 0.09);
+  --interviewai-muted: #8c8c93;
+  --interviewai-blue: #2684ff;
 }
 
 @layer base {
   html {
-    background: var(--perssua-bg);
+    background: var(--interviewai-bg);
   }
 
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    background-color: var(--perssua-bg);
+    background-color: var(--interviewai-bg);
     color: #f4f4f5;
     font-feature-settings: "ss01" on;
     text-rendering: optimizeLegibility;
@@ -30,7 +30,142 @@
 
 .app-shell,
 .app-frame {
-  background: var(--perssua-bg);
+  background: var(--interviewai-bg);
+}
+
+/* Linux desktop: the window is transparent and the app fades itself. */
+html.app-translucent,
+html.app-translucent body {
+  background: transparent;
+}
+
+html.app-translucent:not(.app-solid-text) .app-shell {
+  opacity: var(--app-opacity, 1);
+}
+
+/* Solid text: only the surfaces fade; text stays opaque with boosted contrast.
+   The frame carries the single translucent backdrop and the panels on top of it
+   go clear, so stacked layers don't add up into an opaque block. */
+html.app-solid-text {
+  --app-glass: calc(var(--app-opacity, 1) * 100%);
+}
+
+html.app-solid-text .app-shell {
+  background: transparent;
+}
+
+html.app-solid-text .app-frame {
+  background: color-mix(in srgb, var(--interviewai-bg) var(--app-glass), transparent);
+}
+
+html.app-solid-text .app-tabs,
+html.app-solid-text .app-transcript-feed,
+html.app-solid-text .app-reading-status,
+html.app-solid-text .app-audio-panel,
+html.app-solid-text .app-bottom-bar {
+  background: transparent;
+}
+
+html.app-solid-text .app-shell .transcript-entry,
+html.app-solid-text .app-transcript-feed [class*="bg-["],
+html.app-solid-text .app-transcript-feed [class*="bg-black"],
+html.app-solid-text .app-transcript-feed [class*="bg-zinc-9"],
+html.app-solid-text .app-transcript-feed [class*="bg-gradient-to-"] {
+  background-color: color-mix(in srgb, #0d0d10 calc(var(--app-opacity, 1) * 85%), transparent) !important;
+}
+
+html.app-solid-text .app-shell .say-this {
+  background: color-mix(in srgb, #17140c var(--app-glass), transparent);
+}
+
+html.app-solid-text .app-frame {
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+html.app-solid-text .app-frame [class*="text-zinc-6"],
+html.app-solid-text .app-frame [class*="text-zinc-5"] {
+  color: #c4c4cc !important;
+}
+
+html.app-solid-text .app-frame [class*="text-zinc-4"],
+html.app-solid-text .app-frame [class*="text-zinc-3"] {
+  color: #e4e4e7 !important;
+}
+
+/* Popovers stay opaque, so they don't need the reading aids. */
+html.app-solid-text .app-menu,
+html.app-solid-text .app-context-editor {
+  text-shadow: none;
+}
+
+.app-menu {
+  background: #0d0d0f;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.app-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.app-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.app-menu-item--danger {
+  color: #ff9a9a;
+}
+
+.app-menu-item--danger:hover {
+  background: rgba(255, 87, 87, 0.1);
+}
+
+.app-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--interviewai-line);
+}
+
+.app-menu-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 26px;
+  height: 15px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background-color 180ms ease-out;
+}
+
+.app-menu-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: #f4f4f5;
+  transition: transform 180ms ease-out;
+}
+
+.app-menu-switch--on {
+  background: var(--interviewai-blue);
+}
+
+.app-menu-switch--on::after {
+  transform: translateX(11px);
+}
+
+.app-opacity-slider {
+  accent-color: var(--interviewai-blue);
 }
 
 .app-shell {
@@ -51,7 +186,7 @@
 
 .app-shell button:focus-visible,
 .app-shell input:focus-visible {
-  outline: 2px solid var(--perssua-blue);
+  outline: 2px solid var(--interviewai-blue);
   outline-offset: 2px;
 }
 
@@ -59,46 +194,14 @@
   transform: translateY(1px) scale(0.985);
 }
 
-.app-header {
-  background: rgba(5, 5, 6, 0.96);
-  border-bottom: 1px solid var(--perssua-line);
-  backdrop-filter: blur(18px);
-}
-
-.app-brand-mark {
-  background: #f4f4f5;
-  color: var(--perssua-blue);
-}
-
-.app-brand-mark span span {
-  background: currentColor;
-}
-
-.app-header-chip,
-.app-live-status {
-  background: #0d0d0f;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-}
-
-.app-header-chip:hover,
-.app-quiet-button:hover,
-.app-window-button:hover {
+.app-quiet-button:hover {
   background: rgba(255, 255, 255, 0.075);
   color: #fff;
 }
 
-.app-pin-active {
-  background: rgba(38, 132, 255, 0.13);
-}
-
-.app-window-close:hover {
-  color: #ff7d7d;
-  background: rgba(255, 87, 87, 0.1);
-}
-
 .app-tabs {
   background: #070708;
-  border-bottom: 1px solid var(--perssua-line);
+  border-bottom: 1px solid var(--interviewai-line);
 }
 
 .app-tab-active {
@@ -118,9 +221,9 @@
   gap: 8px;
   flex-shrink: 0;
   padding: 7px 16px;
-  border-top: 1px solid var(--perssua-line);
-  background: var(--perssua-surface);
-  color: var(--perssua-muted);
+  border-top: 1px solid var(--interviewai-line);
+  background: var(--interviewai-surface);
+  color: var(--interviewai-muted);
   font-size: 10px;
 }
 
@@ -148,29 +251,6 @@
   user-select: text;
 }
 
-.empty-wave-panel {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
-}
-
-.empty-wave-bar {
-  display: block;
-  width: 4px;
-  min-height: 4px;
-  border-radius: 999px;
-  background: rgba(235, 235, 240, 0.72);
-  transform-origin: center;
-  animation: waveformBreath 1.8s ease-in-out infinite;
-}
-
-.empty-wave-bar--accent {
-  background: #79adff;
-}
-
-@keyframes waveformBreath {
-  0%, 100% { transform: scaleY(0.84); opacity: 0.72; }
-  50% { transform: scaleY(1); opacity: 1; }
-}
-
 .transcript-entry {
   border-color: rgba(255, 255, 255, 0.09);
   background: #0d0d0f;
@@ -183,12 +263,12 @@
 
 .transcript-entry--answer,
 .transcript-entry--assistant {
-  border-left: 2px solid var(--perssua-blue);
+  border-left: 2px solid var(--interviewai-blue);
 }
 
 .app-audio-panel {
   background: #070708;
-  border-top: 1px solid var(--perssua-line);
+  border-top: 1px solid var(--interviewai-line);
 }
 
 .audio-level-track {
@@ -206,7 +286,7 @@
 
 .app-bottom-bar {
   background: rgba(5, 5, 6, 0.97);
-  border-top: 1px solid var(--perssua-line);
+  border-top: 1px solid var(--interviewai-line);
 }
 
 .app-primary-button:hover {
@@ -218,7 +298,7 @@
   border-color: rgba(255, 255, 255, 0.12);
 }
 
-/* Keep older per-provider utility colors inside Perssua's restrained palette. */
+/* Keep older per-provider utility colors inside the app's restrained palette. */
 .app-shell [class*="text-cyan-"],
 .app-shell [class*="text-indigo-"],
 .app-shell [class*="text-purple-"],
@@ -388,7 +468,7 @@
 }
 
 /* Subtle glow animations */
-@keyframes perssuaPulse {
+@keyframes interviewaiPulse {
   0%, 100% {
     opacity: 1;
     transform: scale(1);
@@ -399,6 +479,6 @@
   }
 }
 
-.animate-perssua-pulse {
-  animation: perssuaPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+.animate-interviewai-pulse {
+  animation: interviewaiPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }

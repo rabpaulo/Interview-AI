@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, X, RefreshCw } from 'lucide-react';
-import { CompactHeader } from './components/CompactHeader.jsx';
 import { CompactTabs } from './components/CompactTabs.jsx';
 import { CompactTranscriptFeed } from './components/CompactTranscriptFeed.jsx';
 import { CompactAudioMeters } from './components/CompactAudioMeters.jsx';
@@ -132,11 +131,17 @@ export default function App() {
     startPcCapture();
   }, [startPcCapture]);
 
-  // Desktop keyboard shortcuts (Alt+Space / Ctrl+D to trigger copilot, Alt+N / Ctrl+Shift+R for new session)
+  // Desktop keyboard shortcuts (Alt+Space toggles mic, Ctrl+D triggers copilot, Alt+N / Ctrl+Shift+R for new session)
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Alt+Space or Ctrl+D / Cmd+D -> Trigger Copilot
-      if ((e.altKey && e.code === 'Space') || ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D'))) {
+      // Alt+Space -> Toggle microphone
+      if (e.altKey && e.code === 'Space' && !e.repeat) {
+        e.preventDefault();
+        toggleListening();
+      }
+
+      // Ctrl+D / Cmd+D -> Trigger Copilot
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault();
         triggerCopilot(null, {
           provider: agentSettings.provider,
@@ -158,6 +163,7 @@ export default function App() {
   }, [
     triggerCopilot,
     handleNewSession,
+    toggleListening,
     agentSettings.provider,
     agentSettings.currentModelId,
     agentSettings.currentReasoning,
@@ -167,8 +173,8 @@ export default function App() {
 
   // Electron Desktop shortcuts & IPC synchronization
   useEffect(() => {
-    if (window.perssuaDesktop?.onShortcut) {
-      const cleanup = window.perssuaDesktop.onShortcut((action) => {
+    if (window.interviewaiDesktop?.onShortcut) {
+      const cleanup = window.interviewaiDesktop.onShortcut((action) => {
         console.log('[Desktop IPC] Shortcut received:', action);
         if (action === 'ask_copilot') {
           triggerCopilot(null, {
@@ -207,23 +213,6 @@ export default function App() {
     <div className="app-shell text-zinc-100 flex flex-col h-dvh w-screen overflow-hidden select-none">
       {/* Frameless Desktop Window Container */}
       <div className="app-frame flex flex-col h-full w-full">
-
-        {/* Sleek Notch / Header Bar */}
-        <CompactHeader
-          isConnected={isConnected}
-          isProcessing={isProcessing}
-          isListening={isListening}
-          isTranscribing={isTranscribing}
-          elapsedSeconds={elapsedSeconds}
-          language={language}
-          setLanguage={setLanguage}
-          agentSettings={agentSettings}
-          selectedPersona={selectedPersona}
-          onOpenModelModal={() => setIsModelModalOpen(true)}
-          onOpenPersonaModal={() => setIsPersonaModalOpen(true)}
-          onNewSession={handleNewSession}
-          onResetSession={handleNewSession}
-        />
 
         {/* New Session Feedback Banner */}
         {sessionToast && (
@@ -279,11 +268,17 @@ export default function App() {
           </div>
         )}
 
-        {/* Perssua Tabs (Transcrição • Sessão • Resumo) */}
+        {/* InterviewAI Tabs (Transcrição • Sessão • Resumo); also the window drag handle,
+            released while a modal is open because drag regions swallow clicks under overlays. */}
         <CompactTabs
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           countMessages={messages.length}
+          isListening={isListening}
+          isTranscribing={isTranscribing}
+          isProcessing={isProcessing}
+          elapsedSeconds={elapsedSeconds}
+          isDraggable={!isModelModalOpen && !isPersonaModalOpen}
         />
 
         {/* Core Feed ("Mostra só o que deve mostrar") */}
@@ -321,14 +316,21 @@ export default function App() {
           agentSettings={agentSettings}
         />
 
-        {/* Compact Bottom Controls Bar (Mic • Diga isso • Keyboard Drawer) */}
+        {/* Compact Bottom Controls Bar (Context • Keyboard Drawer • Mic) */}
         <CompactBottomBar
           isListening={isListening}
           isProcessing={isProcessing}
           toggleListening={toggleListening}
           onSendMessage={sendMessage}
-          onTriggerCopilot={triggerCopilot}
           agentSettings={agentSettings}
+          menuProps={{
+            language,
+            setLanguage,
+            selectedPersona,
+            onOpenModelModal: () => setIsModelModalOpen(true),
+            onOpenPersonaModal: () => setIsPersonaModalOpen(true),
+            onNewSession: handleNewSession,
+          }}
         />
       </div>
 

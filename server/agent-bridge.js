@@ -1,7 +1,9 @@
 import { spawn } from 'child_process';
 import readline from 'readline';
 import { runCodexAgent, prepareCodexSession, closeCodexSession } from './codex-session.js';
+import { runClaudeAgent, prepareClaudeSession, closeClaudeSession } from './claude-session.js';
 export { runCodexAgent, closeCodexSession } from './codex-session.js';
+export { runClaudeAgent, closeClaudeSession } from './claude-session.js';
 
 let warmAgySession = null;
 
@@ -23,6 +25,7 @@ export function closeAgySession() {
 
 process.on('exit', closeAgySession);
 process.on('exit', closeCodexSession);
+process.on('exit', closeClaudeSession);
 
 /** Start the CLI without submitting a model turn. */
 function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEffort = 'high', cwd = process.cwd() }, reusePrepared = false) {
@@ -133,20 +136,26 @@ export function runAgyAgent({ onMessage, onError, onClose, prompt, ...options })
 }
 
 export function prepareAgentSession(options) {
-  return options.provider === 'codex' ? prepareCodexSession(options) : prepareAgySession(options);
+  if (options.provider === 'codex') return prepareCodexSession(options);
+  if (options.provider === 'claude') return prepareClaudeSession(options);
+  return prepareAgySession(options);
 }
 
 export function closeAgentSession(provider) {
   if (!provider || provider === 'antigravity') closeAgySession();
   if (!provider || provider === 'codex') closeCodexSession();
+  if (!provider || provider === 'claude') closeClaudeSession();
 }
 
 /**
- * Unified runner that dispatches to either Antigravity or Codex.
+ * Unified runner that dispatches to Antigravity, Codex or Claude Code.
  */
 export function runUnifiedAgent(options) {
   if (options.provider === 'codex') {
     return runCodexAgent(options);
+  }
+  if (options.provider === 'claude') {
+    return runClaudeAgent(options);
   }
   return runAgyAgent(options);
 }

@@ -8,8 +8,9 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
-test('backend transcribes live but responds only after the complete PC utterance', { timeout: 10000 }, async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'perssua-pc-live-'));
+for (const automatic of [true, false]) {
+test(`backend preserves complete PC speech in ${automatic ? 'automatic' : 'manual'} mode`, { timeout: 10000 }, async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interviewai-pc-live-'));
   const executable = (name, code) => {
     fs.writeFileSync(path.join(dir, name), '#!/usr/bin/env node\n' + code);
     fs.chmodSync(path.join(dir, name), 0o755);
@@ -50,8 +51,12 @@ test('backend transcribes live but responds only after the complete PC utterance
       const event = JSON.parse(raw);
       events.push(event);
       if (event.type === 'connection_ack') {
+        socket.send(JSON.stringify({ type: 'set_auto_respond', autoRespond: automatic }));
         socket.send(JSON.stringify({ type: 'sync_settings', candidateContext: 'Experiência real de suporte ao cliente.' }));
         socket.send(JSON.stringify({ type: 'start_pc_capture', options: { sink: 'test_sink' } }));
+      }
+      if (!automatic && event.type === 'pc_speech_transcribed') {
+        socket.send(JSON.stringify({ type: 'trigger_copilot', text: 'E como eu verificaria isso?' }));
       }
       if (event.type === 'copilot_error' || event.type === 'pc_speech_error') reject(new Error(event.error));
       if (event.type === 'copilot_completed') resolve(event);
@@ -65,7 +70,12 @@ test('backend transcribes live but responds only after the complete PC utterance
   assert.ok(transcribed >= 0 && started > transcribed, 'the complete transcript must precede inference');
   assert.equal(events.filter((event) => event.type === 'copilot_started').length, 1);
   assert.equal(response.isPreview, false);
-  assert.match(response.replyId, /^copilot-pc-/);
+  assert.match(response.replyId, automatic ? /^copilot-pc-/ : /^copilot-/);
   assert.ok(response.response);
   assert.ok(response.response.includes('Experiência real de suporte ao cliente.'), 'automatic responses must receive candidate context');
+  if (!automatic) {
+    const recent = JSON.parse(response.response.match(/FALAS RECENTES DA SESSÃO[^\n]*\n([^\n]+)/)[1]);
+    assert.deepEqual(recent, [{ role: 'interlocutor', text: 'Como resolvo esse problema no servidor?' }]);
+  }
 });
+}

@@ -8,6 +8,7 @@ import {
   Clock,
   Terminal,
   Bot,
+  Asterisk,
   Monitor,
   Send,
   FileText,
@@ -17,9 +18,18 @@ import {
 } from 'lucide-react';
 import { FormattedAgentResponse } from './CodeBlock.jsx';
 
+const AGENT_STYLES = {
+  antigravity: { name: 'ANTIGRAVITY', fallbackModel: 'Gemini', Icon: Sparkles, card: 'border-cyan-500/25 bg-[#0f1422]/85',
+    divider: 'border-cyan-500/15', icon: 'text-cyan-400', label: 'text-cyan-300' },
+  codex: { name: 'CODEX', fallbackModel: 'GPT-6', Icon: Bot, card: 'border-purple-500/25 bg-[#14101e]/85',
+    divider: 'border-purple-500/15', icon: 'text-purple-400', label: 'text-purple-300' },
+  claude: { name: 'CLAUDE CODE', fallbackModel: 'Claude', Icon: Asterisk, card: 'border-amber-500/25 bg-[#1a140c]/85',
+    divider: 'border-amber-500/15', icon: 'text-amber-400', label: 'text-amber-300' },
+};
+
 export function CompactTranscriptFeed({
   activeTab,
-  messages,
+  messages: allMessages,
   interimTranscript,
   isListening,
   isPcCapturing,
@@ -35,6 +45,9 @@ export function CompactTranscriptFeed({
   onSendMessage,
   agentSettings,
 }) {
+  // Summary requests/replies live only in the Resumo tab.
+  const messages = allMessages.filter((m) => m.source !== 'summary');
+  const summaryReply = [...allMessages].reverse().find((m) => m.source === 'summary' && m.role === 'agent');
   const [copiedId, setCopiedId] = useState(null);
   const [isFollowing, setIsFollowing] = useState(true);
   const feedRef = useRef(null);
@@ -98,12 +111,6 @@ export function CompactTranscriptFeed({
   };
 
   const miniBars = frequencyBars ? frequencyBars.slice(16, 32) : [];
-  const heroWaveBars = Array.from({ length: 56 }, (_, index) => {
-    const distance = Math.abs(index - 27.5) / 27.5;
-    const shape = Math.max(12, Math.round((Math.sin(index * 0.58) * 0.22 + 0.44) * (1 - distance * 0.7) * 100));
-    const liveValue = frequencyBars?.length ? frequencyBars[index % frequencyBars.length] : 0;
-    return isListening && liveValue > 2 ? Math.max(10, Math.min(100, liveValue)) : shape;
-  });
   const activeProviderName = agentSettings?.currentProviderConfig?.shortName || 'Agente';
 
   // --- TAB: TRANSCRIÇÃO ---
@@ -135,31 +142,13 @@ export function CompactTranscriptFeed({
         {/* Empty state */}
         {messages.length === 0 && !interimTranscript && !isProcessing && !isPcSpeaking && !isTranscribingPc && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-500 min-h-[260px]">
-            <div className="empty-wave-panel w-full max-w-[560px] px-5 py-4 mb-6 rounded-2xl border border-white/[0.08] bg-[#0a0a0b]">
-              <div className="flex items-center justify-center gap-[3px] h-12" aria-hidden="true">
-                {heroWaveBars.map((height, index) => (
-                  <span
-                    key={index}
-                    className={`empty-wave-bar ${index % 9 === 0 ? 'empty-wave-bar--accent' : ''}`}
-                    style={{ height: `${height}%`, animationDelay: `${(index % 12) * 45}ms` }}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center justify-center gap-2 mt-3 text-[10px] text-zinc-500">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                <span>Áudio em tempo real</span>
-              </div>
-            </div>
             <div className="w-10 h-10 rounded-full bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-2.5 text-blue-300">
               <Mic size={17} />
             </div>
-            <h4 className="text-zinc-200 font-semibold text-xs mb-1">Perssua está escutando</h4>
-            <p className="text-[11px] text-zinc-400 max-w-[280px] leading-relaxed mb-3">
-              Fale no microfone ou no áudio do PC. As transcrições e respostas da IA aparecerão aqui em tempo real.
-            </p>
+            <h4 className="text-zinc-200 font-semibold text-xs mb-1">InterviewAI está escutando</h4>
             <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.04] border border-white/[0.06] text-[10px] text-zinc-400 font-mono">
               <kbd className="px-1 py-0.5 rounded bg-white/10 text-zinc-200">ESPAÇO</kbd> para falar •{' '}
-              <kbd className="px-1 py-0.5 rounded bg-white/10 text-zinc-200">Alt+Space</kbd> Diga isso
+              <kbd className="px-1 py-0.5 rounded bg-white/10 text-zinc-200">Alt+Space</kbd> microfone
             </div>
           </div>
         )}
@@ -275,33 +264,22 @@ export function CompactTranscriptFeed({
             );
           }
 
-          // 4. Agent Code / Task Output (Antigravity / Codex)
-          const isCodex = item.provider === 'codex';
+          // 4. Agent Code / Task Output (Antigravity / Codex / Claude Code)
+          const style = AGENT_STYLES[item.provider] || AGENT_STYLES.antigravity;
+          const AgentIcon = style.Icon;
           return (
             <div
               key={key}
-              className={`transcript-entry transcript-entry--assistant rounded-xl border p-3 shadow-md ${
-                isCodex
-                  ? 'border-purple-500/25 bg-[#14101e]/85'
-                  : 'border-cyan-500/25 bg-[#0f1422]/85'
-              }`}
+              className={`transcript-entry transcript-entry--assistant rounded-xl border p-3 shadow-md ${style.card}`}
             >
               <div
-                className={`flex items-center justify-between mb-1.5 pb-1.5 border-b text-[10px] ${
-                  isCodex ? 'border-purple-500/15' : 'border-cyan-500/15'
-                }`}
+                className={`flex items-center justify-between mb-1.5 pb-1.5 border-b text-[10px] ${style.divider}`}
               >
                 <div className="flex items-center gap-1.5 font-bold tracking-wide">
-                  {isCodex ? (
-                    <Bot size={12} className="text-purple-400" />
-                  ) : (
-                    <Sparkles size={12} className="text-cyan-400" />
-                  )}
-                  <span className={isCodex ? 'text-purple-300' : 'text-cyan-300'}>
-                    {isCodex ? 'CODEX' : 'ANTIGRAVITY'}
-                  </span>
+                  <AgentIcon size={12} className={style.icon} />
+                  <span className={style.label}>{style.name}</span>
                   <span className="text-[9px] font-mono text-zinc-400 font-normal">
-                    • {item.model || (isCodex ? 'GPT-6' : 'Gemini')}
+                    • {item.model || style.fallbackModel}
                   </span>
                 </div>
 
@@ -537,12 +515,41 @@ export function CompactTranscriptFeed({
             )}
           </div>
 
+          {summaryReply && (
+            <div className="mb-3 p-2.5 rounded-lg bg-emerald-950/20 border border-emerald-500/20">
+              <div className="flex items-center justify-between text-[10px] text-emerald-300 mb-1.5 font-semibold">
+                <span>RESUMO DA IA</span>
+                {summaryReply.text && (
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(summaryReply.text, 'summary-reply')}
+                    className="p-1 hover:bg-emerald-500/20 rounded cursor-pointer"
+                    title="Copiar resumo"
+                    aria-label="Copiar resumo"
+                  >
+                    {copiedId === 'summary-reply' ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
+                  </button>
+                )}
+              </div>
+              {summaryReply.status === 'streaming' && !summaryReply.text ? (
+                <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-emerald-400" />
+                  <span>Sintetizando resumo...</span>
+                </div>
+              ) : (
+                <div className="text-zinc-100 leading-relaxed text-[12px]">
+                  <FormattedAgentResponse text={summaryReply.text} />
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
             onClick={() =>
               onSendMessage?.(
                 'Gere um resumo conciso com tópicos executivos e próximos passos de tudo o que foi falado nesta sessão.',
-                'text',
+                'summary',
                 {
                   provider: agentSettings?.provider,
                   model: agentSettings?.currentModelId,
@@ -555,7 +562,7 @@ export function CompactTranscriptFeed({
             className="w-full py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold border border-emerald-500/30 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
           >
             <Sparkles size={12} />
-            <span>Sintetizar Resumo com IA</span>
+            <span>{summaryReply ? 'Atualizar Resumo com IA' : 'Sintetizar Resumo com IA'}</span>
           </button>
         </div>
       </div>

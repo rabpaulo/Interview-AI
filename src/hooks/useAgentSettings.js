@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { PROVIDERS } from '../config/models.js';
 
 const STORAGE_KEY = 'perssua_agent_settings_v1';
+const byProvider = (value) => Object.fromEntries(Object.keys(PROVIDERS).map((id) => [id, value(id)]));
 
 export function useAgentSettings() {
   const [provider, setProviderState] = useState(() => {
@@ -20,16 +21,10 @@ export function useAgentSettings() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
-          antigravity: parsed.models?.antigravity || PROVIDERS.antigravity.defaultModel,
-          codex: parsed.models?.codex || PROVIDERS.codex.defaultModel,
-        };
+        return byProvider((id) => parsed.models?.[id] || PROVIDERS[id].defaultModel);
       }
     } catch {}
-    return {
-      antigravity: PROVIDERS.antigravity.defaultModel,
-      codex: PROVIDERS.codex.defaultModel,
-    };
+    return byProvider((id) => PROVIDERS[id].defaultModel);
   });
 
   const [reasoningEfforts, setReasoningEffortsState] = useState(() => {
@@ -37,16 +32,10 @@ export function useAgentSettings() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
-          antigravity: parsed.reasoningEfforts?.antigravity || PROVIDERS.antigravity.defaultReasoning,
-          codex: parsed.reasoningEfforts?.codex || PROVIDERS.codex.defaultReasoning,
-        };
+        return byProvider((id) => parsed.reasoningEfforts?.[id] || PROVIDERS[id].defaultReasoning);
       }
     } catch {}
-    return {
-      antigravity: PROVIDERS.antigravity.defaultReasoning,
-      codex: PROVIDERS.codex.defaultReasoning,
-    };
+    return byProvider((id) => PROVIDERS[id].defaultReasoning);
   });
 
   const [fastMode, setFastModeState] = useState(() => {

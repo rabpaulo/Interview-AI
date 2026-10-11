@@ -11,6 +11,7 @@ import { transcribeAudioBuffer } from './transcriber.js';
 import { wirePcTranscription } from './pc-transcription.js';
 import { createLiveCopilot } from './live-copilot.js';
 import { readCandidateContext } from './candidate-context.js';
+import { createConversationMemory } from './conversation-memory.js';
 import { AVAILABLE_MODELS, AVAILABLE_PERSONAS, generateCopilotResponse } from './gemini-copilot.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,6 +42,12 @@ const wss = new WebSocketServer({ server });
 const activeConversationIds = {
   antigravity: null,
   codex: null,
+  claude: null,
+};
+const DEFAULT_MODELS = {
+  antigravity: 'gemini-3.8-flash',
+  codex: 'gpt-6-luna',
+  claude: 'claude-sonnet-5-5',
 };
 let activeAgentProcess = null;
 let copilotGeneration = 0;
@@ -54,6 +61,7 @@ let candidateContext = '';
 let autoRespond = true;
 let lastPcTranscript = '';
 let activeLanguage = 'pt-BR';
+const conversationMemory = createConversationMemory();
 
 function broadcast(data) {
   const payload = JSON.stringify(data);
@@ -124,12 +132,12 @@ function resetAgentSession(provider) {
   closeAgentSession(provider);
   if (provider && activeConversationIds[provider] !== undefined) activeConversationIds[provider] = null;
   else {
-    activeConversationIds.antigravity = null;
-    activeConversationIds.codex = null;
+    for (const name of Object.keys(activeConversationIds)) activeConversationIds[name] = null;
   }
   pcTranscription.cancel();
   systemAudioEngine.discardSpeech();
   lastPcTranscript = '';
+  conversationMemory.clear();
   broadcast({ type: 'session_reset', activeConversationIds, timestamp: Date.now() });
   prepareSelectedSession();
 }
@@ -162,6 +170,7 @@ const pcTranscription = wirePcTranscription(systemAudioEngine, {
   onCancel: (id) => liveCopilot.cancel(id),
   onFinal: (text, id) => {
     lastPcTranscript = text;
+    conversationMemory.remember('interlocutor', text);
     liveCopilot.final(text, id);
   },
 });
@@ -172,6 +181,7 @@ systemAudioEngine.on('status', (status) => {
 
 function triggerCopilotForText(transcript, overrideOptions = {}) {
   if (!transcript?.trim()) return;
+  conversationMemory.remember('interlocutor', transcript);
 
   if (activeAgentProcess) {
     activeAgentProcess.kill();
@@ -189,7 +199,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
   };
 
   const provider = overrideOptions.provider || selectedProvider || 'antigravity';
-  const model = overrideOptions.model || selectedModel || (provider === 'codex' ? 'gpt-6-luna' : 'gemini-3.8-flash');
+  const model = overrideOptions.model || selectedModel || (DEFAULT_MODELS[provider] || DEFAULT_MODELS.antigravity);
   const persona = overrideOptions.persona || selectedPersona;
   const reasoningEffort = overrideOptions.reasoningEffort || selectedReasoningEffort || 'medium';
   const fastMode = overrideOptions.fastMode !== undefined ? overrideOptions.fastMode : selectedFastMode;
@@ -215,6 +225,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
     conversationId: convId,
     isPreview: isPreview(),
     candidateContext,
+    recentTurns: conversationMemory.beforeQuestion(transcript),
     cwd: process.cwd(),
     onToken: (token, fullText) => {
       if (generation !== copilotGeneration || settled) return;
@@ -273,6 +284,7 @@ app.get('/api/status', (req, res) => {
   const codexBin = process.env.CODEX_BIN || '/usr/bin/codex';
   const hasAgy = fs.existsSync(agyBin);
   const hasCodex = fs.existsSync(codexBin);
+  const claudeBin = process.env.CLAUDE_BIN || '/usr/bin/claude';
 
   res.json({
     status: 'online',
@@ -280,6 +292,8 @@ app.get('/api/status', (req, res) => {
     agyBinPath: agyBin,
     codexAvailable: hasCodex,
     codexBinPath: codexBin,
+    claudeAvailable: fs.existsSync(claudeBin),
+    claudeBinPath: claudeBin,
     cwd: process.cwd(),
     selectedProvider,
     selectedModel,
@@ -398,6 +412,7 @@ app.post('/api/message', (req, res) => {
 
   let finalResponse = '';
   const convId = activeConversationIds[provider];
+  conversationMemory.remember('user', text);
 
   activeAgentProcess = runUnifiedAgent({
     provider,
@@ -580,7 +595,7 @@ function handleClientMessage(ws, data) {
     }
 
     const provider = data.provider || selectedProvider || 'antigravity';
-    const model = data.model || selectedModel || (provider === 'codex' ? 'gpt-6-luna' : 'gemini-3.8-flash');
+    const model = data.model || selectedModel || (DEFAULT_MODELS[provider] || DEFAULT_MODELS.antigravity);
     const reasoningEffort = data.reasoningEffort || selectedReasoningEffort || 'medium';
     const fastMode = data.fastMode !== undefined ? data.fastMode : selectedFastMode;
     const currentConvId = activeConversationIds[provider] || null;
@@ -592,6 +607,7 @@ function handleClientMessage(ws, data) {
     }
 
     // Broadcast user message to UI
+    conversationMemory.remember('user', prompt);
     ws.send(
       JSON.stringify({
         type: 'user_message_acknowledged',
@@ -702,7 +718,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Perssua Code Server] Running on http://localhost:${PORT}`);
-  console.log(`[Perssua Code Server] WebSocket ready on ws://localhost:${PORT}`);
+  console.log(`[InterviewAI Server] Running on http://localhost:${PORT}`);
+  console.log(`[InterviewAI Server] WebSocket ready on ws://localhost:${PORT}`);
   prepareSelectedSession();
 });

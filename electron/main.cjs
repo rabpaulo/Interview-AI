@@ -9,9 +9,22 @@ let isAlwaysOnTop = true;
 let currentMode = 'compact'; // 'compact' | 'mini'
 let previousBounds = { width: 440, height: 620, x: undefined, y: undefined };
 let serverProcess = null;
+// Electron's native setOpacity is a no-op on Linux, so there the window is
+// transparent and the renderer fades itself with CSS instead.
+const useCssOpacity = process.platform === 'linux';
 const managedByDevScript = process.argv.includes('--managed-backend');
-const devRendererUrl = process.env.PERSSUA_DEV_URL || 'http://localhost:5173';
+const devRendererUrl = process.env.INTERVIEWAI_DEV_URL || 'http://localhost:5173';
 const managedRenderer = process.argv.includes('--managed-renderer') || managedByDevScript;
+
+// Carry saved settings over from the app's previous name (one-time copy).
+const legacyUserData = path.join(app.getPath('appData'), 'perssua-code-copilot');
+if (!fs.existsSync(app.getPath('userData')) && fs.existsSync(legacyUserData)) {
+  try {
+    fs.cpSync(legacyUserData, app.getPath('userData'), { recursive: true });
+  } catch (error) {
+    console.warn('[Electron] Could not migrate legacy user data:', error.message);
+  }
+}
 
 function ensureServerRunning() {
   const isBackendRunning = () => new Promise((resolve) => {
@@ -79,13 +92,13 @@ function createWindow() {
     minHeight: 440,
     maxWidth: 680,
     maxHeight: 1000,
-    backgroundColor: '#0c0c11',
-    title: 'Perssua AI Copilot',
+    backgroundColor: useCssOpacity ? '#00000000' : '#0c0c11',
+    title: 'InterviewAI',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     autoHideMenuBar: true,
     frame: false, // frameless for sleek floating widget with custom draggable header
-    transparent: false,
-    alwaysOnTop: true, // starts pinned like the real Perssua
+    transparent: useCssOpacity,
+    alwaysOnTop: true, // starts pinned
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -154,18 +167,18 @@ function createWindow() {
 }
 
 function setupShortcuts() {
-  // Global Shortcut: Alt+Space -> Ask Copilot to assist immediately
+  // Global Shortcut: Alt+Space -> Toggle mic recording
   globalShortcut.register('Alt+Space', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('perssua:shortcut', 'ask_copilot');
+      mainWindow.webContents.send('interviewai:shortcut', 'toggle_mic');
     }
   });
 
-  // Global Shortcut: CommandOrControl+D -> Analyze / Ask Copilot (Perssua keybinding)
+  // Global Shortcut: CommandOrControl+D -> Analyze / Ask Copilot (InterviewAI keybinding)
   try {
     globalShortcut.register('CommandOrControl+D', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('perssua:shortcut', 'ask_copilot');
+        mainWindow.webContents.send('interviewai:shortcut', 'ask_copilot');
       }
     });
   } catch (err) {
@@ -215,21 +228,21 @@ function setupShortcuts() {
   // Global Shortcut: Alt+Shift+P -> Toggle PC audio listening
   globalShortcut.register('Alt+Shift+P', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('perssua:shortcut', 'toggle_pc_audio');
+      mainWindow.webContents.send('interviewai:shortcut', 'toggle_pc_audio');
     }
   });
 
   // Global Shortcut: Alt+Shift+M -> Toggle mic recording
   globalShortcut.register('Alt+Shift+M', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('perssua:shortcut', 'toggle_mic');
+      mainWindow.webContents.send('interviewai:shortcut', 'toggle_mic');
     }
   });
 
   // Global Shortcut: Alt+Shift+N -> Nova Sessão
   globalShortcut.register('Alt+Shift+N', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('perssua:shortcut', 'new_session');
+      mainWindow.webContents.send('interviewai:shortcut', 'new_session');
     }
   });
 }
@@ -266,27 +279,33 @@ function setWindowMode(mode) {
 }
 
 // IPC Handlers
-ipcMain.handle('perssua:toggle-always-on-top', () => {
+ipcMain.handle('interviewai:toggle-always-on-top', () => {
   if (!mainWindow) return false;
   isAlwaysOnTop = !isAlwaysOnTop;
   mainWindow.setAlwaysOnTop(isAlwaysOnTop, isAlwaysOnTop ? 'screen-saver' : 'normal');
   return isAlwaysOnTop;
 });
 
-ipcMain.handle('perssua:get-always-on-top', () => {
+ipcMain.handle('interviewai:get-always-on-top', () => {
   if (!mainWindow) return false;
   return mainWindow.isAlwaysOnTop();
 });
 
-ipcMain.on('perssua:set-mode', (_event, mode) => {
+ipcMain.on('interviewai:set-mode', (_event, mode) => {
   setWindowMode(mode);
 });
 
-ipcMain.on('perssua:minimize', () => {
+ipcMain.on('interviewai:set-opacity', (_event, value) => {
+  if (!mainWindow || mainWindow.isDestroyed() || useCssOpacity) return;
+  const opacity = Number(value);
+  if (Number.isFinite(opacity)) mainWindow.setOpacity(Math.min(1, Math.max(0.3, opacity)));
+});
+
+ipcMain.on('interviewai:minimize', () => {
   if (mainWindow) mainWindow.minimize();
 });
 
-ipcMain.on('perssua:close', () => {
+ipcMain.on('interviewai:close', () => {
   if (mainWindow) mainWindow.close();
 });
 

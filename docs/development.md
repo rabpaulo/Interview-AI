@@ -22,7 +22,7 @@ Instale e autentique o CLI do provedor escolhido antes de abrir o app. Para veri
 node --version
 python3 -c "import speech_recognition; print(speech_recognition.__version__)"
 command -v ffmpeg pactl parec
-command -v agy codex
+command -v agy codex claude
 ```
 
 ## Executar e compilar
@@ -57,8 +57,9 @@ Mudanças no backend exigem reiniciar seu processo. Fechar o Electron encerra o 
 | --- | --- |
 | AGY_BIN | Caminho do executável Antigravity. Defina explicitamente: o fallback atual é um caminho da máquina original do projeto. |
 | CODEX_BIN | Caminho do executável Codex; fallback atual: /usr/bin/codex. |
+| CLAUDE_BIN | Caminho do executável Claude Code; fallback atual: /usr/bin/claude. |
 | PORT | Porta ao iniciar server/index.js diretamente; o launcher desktop fixa 3001. |
-| PERSSUA_DEV_URL | URL do renderer; preenchida pelo script de desenvolvimento. |
+| INTERVIEWAI_DEV_URL | URL do renderer; preenchida pelo script de desenvolvimento. |
 | LATENCY_PROVIDER, LATENCY_MODEL, LATENCY_RUNS | Configuração do script de medição de latência. |
 
 ```bash
@@ -86,6 +87,8 @@ O backend não carrega `.env` automaticamente. Exporte as variáveis no shell ou
 | server/gemini-copilot.js | Prompts das personas e despacho para ambos os provedores. |
 | server/agent-bridge.js e server/codex-session.js | Processos persistentes dos CLIs. |
 | server/candidate-context.js | Leitura limitada ao contexto.md da raiz do projeto. |
+| server/conversation-memory.js | Janela de falas reais, separada de sugestões da IA, enviada a cada pedido do copiloto. |
+| shared/candidate-profile.js | Montagem do contexto com experiências e informações da entrevista preenchidas pelo usuário. |
 
 `GET /api/candidate-context/file` lê o arquivo fixo do projeto, sem aceitar um caminho do cliente. Retorna o texto ou um erro para o editor. A importação só altera o contexto ativo quando o usuário salva; a sincronização usa `/api/settings` e o evento WebSocket `sync_settings`.
 
@@ -98,6 +101,10 @@ git diff --check
 ```
 
 Os testes simulam CLIs, reconhecimento e captura quando necessário; não enviam perguntas a provedores reais. Eles abrem portas locais e criam processos filhos, então o ambiente precisa permitir essas operações. Há testes específicos para leitura de contexto, cancelamento, retomada de fala, fila de respostas e reutilização de sessões.
+
+Os testes de sessão verificam que perguntas de continuidade recebem as falas anteriores, as mensagens do usuário e suas correções pelos dois provedores. Também verificam a limpeza em nova sessão, a ausência de sugestões geradas entre os fatos e a preservação de falas captadas no modo manual. Isso valida os dados enviados, não a qualidade semântica de um modelo real.
+
+Para revisar respostas reais em seis cenários fictícios (técnico, hipótese, experiência conhecida, experiência ausente, continuidade e dado pessoal ausente), execute `npm run eval:copilot`. Esse comando usa a cota do provedor autenticado; não faz parte de `npm test`. Configure `EVAL_PROVIDER`, `EVAL_MODEL` e, opcionalmente, `EVAL_CASE`. O relatório JSON contém o texto das respostas para revisão humana. Verifique se a explicação é concreta, se hipóteses estão identificadas, se experiências e resultados foram preservados e se dados pessoais não foram inventados.
 
 O script `scripts/measure-response-latency.js` é diferente da suíte offline: chama o provedor autenticado e consome sua cota. Veja [como medir](response-latency.md#medir-o-provedor).
 

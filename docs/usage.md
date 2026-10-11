@@ -2,7 +2,7 @@
 
 ## Preparar uma entrevista
 
-Abra o app com `npm start`. No cabeçalho, selecione o provedor, o modelo, o nível de raciocínio e a persona adequada: conversa geral, entrevista técnica, arquitetura, comportamental, RH, perguntas ao entrevistador ou vendas.
+Abra o app com `npm start`. No menu (☰) da barra inferior, selecione em **Modelo** o provedor, o modelo e o nível de raciocínio, e em **Modo** a persona adequada: conversa geral, entrevista técnica, arquitetura, comportamental, RH, perguntas ao entrevistador ou vendas.
 
 O app prepara a sessão do agente sem enviar uma pergunta. A disponibilidade dos modelos depende do CLI e da conta autenticada; o seletor contém uma lista definida no projeto.
 
@@ -17,7 +17,9 @@ O ícone de pessoa na barra inferior abre o editor. Inclua fatos que possam sust
 | Salvar contexto | Aplica o texto às próximas sugestões do copiloto. |
 | Cancelar ou fechar | Descarta a edição e preserva o contexto salvo. |
 
-O editor aceita até 6.000 caracteres. A importação informa erro se o arquivo estiver ausente, vazio, inacessível ou acima do limite; o rascunho anterior é preservado. O app não escreve no arquivo ao salvar e não acompanha alterações nele automaticamente.
+O editor aceita até 6.000 caracteres, contando também os campos guiados. A importação informa erro se o arquivo estiver ausente, vazio, inacessível ou acima do limite; o rascunho anterior é preservado. O app não escreve no arquivo ao salvar e não acompanha alterações nele automaticamente.
+
+Em **Preparar uma experiência real**, descreva o problema, sua participação, decisões, resultado e aprendizado. Os campos são opcionais: espaços vazios não viram fatos e não há preenchimento automático de resultados. Use **Incluir experiência e preparar outra** para acrescentar mais histórias. Em **Preparar a entrevista atual**, informe a vaga, requisitos e seus motivos reais. **Salvar contexto** inclui todos os campos preenchidos, mesmo sem usar o botão de incluir experiência. Cancelar descarta o rascunho inteiro.
 
 O contexto salvo fica no armazenamento local do frontend e é sincronizado com o backend. Ele acompanha os pedidos de **Diga isso**, tanto automáticos quanto manuais. Mensagens digitadas e mensagens do microfone seguem o fluxo direto do agente, sem acrescentar esse campo ao prompt de cada pedido.
 
@@ -33,13 +35,16 @@ Após cerca de 900 ms de silêncio, o app encerra o trecho. Uma pausa no meio da
 
 O microfone grava uma mensagem para o agente. Clique para iniciar e parar, ou segure **Espaço** e solte para enviar. Digitar pelo botão de teclado também envia uma mensagem direta ao agente.
 
-**Diga isso** pede uma fala pronta para responder ao interlocutor, em tom profissional e conversacional. O prompt orienta o modelo a usar fatos disponíveis e não inventar experiências. Sem contexto pessoal suficiente, a sugestão pode ser apenas uma abertura breve; não substitui uma resposta baseada na sua trajetória.
+**Diga isso** pede uma fala pronta para responder ao interlocutor, em tom profissional e conversacional. Perguntas técnicas usam conhecimento geral mesmo quando o assunto não aparece no perfil. Perguntas hipotéticas recebem uma proposta no condicional, com passos e justificativa. Para experiências passadas, o modelo deve usar somente fatos informados: pode aproveitar uma experiência relacionada e indicar uma abordagem hipotética, sem transformar isso em uma história real. Dados pessoais ausentes, como salário ou disponibilidade, continuam exigindo confirmação.
+
+O backend mantém uma janela limitada de falas consolidadas do PC e mensagens enviadas por texto ou microfone, inclusive com o modo automático desligado. Essa janela acompanha as sugestões para dar sentido a perguntas como “por quê?” ou “nesse projeto?”. Respostas da IA não são armazenadas nessa memória como fatos pessoais. Ela fica em memória durante a sessão, é compartilhada na troca de provedor e é apagada por **Nova Sessão** ou ao reiniciar o backend. O microfone continua sendo uma mensagem manual ao agente; ele não registra continuamente tudo o que você diz na chamada.
 
 ## Atalhos
 
 | Atalho | Ação | Disponibilidade |
 | --- | --- | --- |
-| Alt+Space ou Ctrl+D | Pedir uma sugestão para a última fala | Global no Electron |
+| Alt+Space | Alternar microfone | Global no Electron e app em foco |
+| Ctrl+D | Pedir uma sugestão para a última fala | Global no Electron |
 | Ctrl+B | Ocultar ou mostrar a janela | Global no Electron |
 | Alt+Shift+P | Alternar captura do PC | Global no Electron |
 | Alt+Shift+M | Alternar microfone | Global no Electron |

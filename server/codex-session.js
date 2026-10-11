@@ -119,7 +119,7 @@ function getSession({ conversationId, model = 'gpt-6-luna', reasoningEffort = 'm
   child.stdin.on('error', fail);
   child.on('close', (code) => fail(new Error(`Codex encerrou a sessão (código ${code})`)));
   session.ready = (async () => {
-    await session.rpc('initialize', { clientInfo: { name: 'perssua_code_copilot', title: 'Perssua Code Copilot', version: '1.0.0' } });
+    await session.rpc('initialize', { clientInfo: { name: 'interviewai', title: 'InterviewAI', version: '1.0.0' } });
     send({ method: 'initialized', params: {} });
     const result = await session.rpc(conversationId ? 'thread/resume' : 'thread/start', {
       ...(conversationId ? { threadId: conversationId } : {}), model, cwd,

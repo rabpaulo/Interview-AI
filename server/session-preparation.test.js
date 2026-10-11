@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { readCandidateContext } from './candidate-context.js';
 
-for (const provider of ['antigravity', 'codex']) {
+const MODELS = { antigravity: 'gemini-3.8-flash', codex: 'gpt-6-luna', claude: 'claude-sonnet-5-5' };
+
+for (const provider of Object.keys(MODELS)) {
   test(`${provider}: backend prepares on startup/settings/reset and the first question uses that thread`, { timeout: 10000 }, async (t) => {
     const probe = net.createServer();
     await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
@@ -16,6 +18,7 @@ for (const provider of ['antigravity', 'codex']) {
       stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PORT: String(port),
         AGY_BIN: fileURLToPath(new URL('./fixtures/agy-session.cjs', import.meta.url)),
         CODEX_BIN: fileURLToPath(new URL('./fixtures/codex-session.cjs', import.meta.url)),
+        CLAUDE_BIN: fileURLToPath(new URL('./fixtures/claude-session.cjs', import.meta.url)),
       },
     });
     let socket;
@@ -75,9 +78,9 @@ for (const provider of ['antigravity', 'codex']) {
     const startup = ack.agentSession.status === 'ready' ? ack.agentSession : await waitFor(ready);
     assert.equal(startup.provider, 'antigravity');
     assert.equal(events.some((e) => e.type === 'agent_stream' || e.type === 'copilot_started'), false);
-    const settings = { provider, model: provider === 'codex' ? 'gpt-6-luna' : 'gemini-3.8-flash', reasoningEffort: 'medium', fastMode: true };
+    const settings = { provider, model: MODELS[provider], reasoningEffort: 'medium', fastMode: true };
     let prepared = startup;
-    if (provider === 'codex') {
+    if (provider !== 'antigravity') {
       const since = events.length;
       socket.send(JSON.stringify({ type: 'sync_settings', ...settings }));
       prepared = await waitFor((e) => ready(e) && e.provider === provider, since);
@@ -112,11 +115,44 @@ for (const provider of ['antigravity', 'codex']) {
       assert.equal(reply.response.includes('Tenho experiência com atendimento e treinamento.'), Boolean(candidateContext));
       assert.ok(reply.response.includes('CONTEXTO PESSOAL ATUAL'));
     }
+    // Follow-up questions receive actual input through both provider bridges.
+    await post('/api/reset-session', {});
+    const question = async (text) => {
+      const since = events.length;
+      await post('/api/copilot/trigger', { text, ...settings });
+      const reply = await waitFor((e) => e.type === 'copilot_completed', since);
+      return JSON.parse(reply.response.match(/FALAS RECENTES DA SESSÃO[^\n]*\n([^\n]+)/)[1]);
+    };
+    assert.deepEqual(await question('Estamos desenhando um checkout com pagamentos duplicados.'), []);
+    await post('/api/message', { text: 'Eu implementei a validação de pedidos no projeto Loja.', ...settings });
+    assert.deepEqual(await question('Como você resolveria isso?'), [
+      { role: 'interlocutor', text: 'Estamos desenhando um checkout com pagamentos duplicados.' },
+      { role: 'user', text: 'Eu implementei a validação de pedidos no projeto Loja.' },
+    ]);
+    const sinceUser = events.length;
+    socket.send(JSON.stringify({ type: 'voice_message', text: 'Na verdade, minha participação foi só no frontend.', ...settings }));
+    await waitFor((e) => e.type === 'agent_done', sinceUser);
+    const recent = await question('E qual foi sua participação?');
+    assert.equal(recent.at(-1).role, 'user');
+    assert.equal(recent.at(-1).text, 'Na verdade, minha participação foi só no frontend.');
+    assert.equal(recent.length, 4, 'generated answers must never become candidate facts');
+    assert.deepEqual(await question('E qual foi sua participação?'), recent, 'retrying a question must not duplicate it');
+    await post('/api/reset-session', {});
+    assert.deepEqual(await question('Outro assunto: como funciona um índice SQL?'), [], 'new sessions discard old interview facts');
+
     // A reset superseded before initialization finishes must never publish an old ID.
     const since = events.length;
     socket.send(JSON.stringify({ type: 'reset_session' }));
     socket.send(JSON.stringify({ type: 'reset_session' }));
     const final = await waitFor(ready, since);
+    if (provider === 'claude') {
+      // Claude sessions are ready as soon as the process spawns, so each reset may
+      // publish its own ready event; the last one published must be the active ID.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      status = await (await fetch(`${url}/api/status`)).json();
+      assert.equal(status.activeConversationIds[provider], events.slice(since).filter(ready).at(-1).conversationId);
+      return;
+    }
     status = await (await fetch(`${url}/api/status`)).json();
     assert.equal(status.activeConversationIds[provider], final.conversationId);
     assert.equal(events.slice(since).filter(ready).length, 1);

@@ -5,7 +5,7 @@ import { prepareAgentSession, runUnifiedAgent, closeAgentSession } from '../serv
 import { buildCopilotPrompt } from '../server/gemini-copilot.js';
 
 const provider = process.env.LATENCY_PROVIDER || 'antigravity';
-const model = process.env.LATENCY_MODEL || (provider === 'codex' ? 'gpt-5.6-luna' : 'gemini-3.8-flash');
+const model = process.env.LATENCY_MODEL || ({ codex: 'gpt-5.6-luna', claude: 'claude-haiku-5-5' }[provider] || 'gemini-3.8-flash');
 const reasoningEffort = 'low';
 const options = { provider, model, reasoningEffort, fastMode: true, cwd: process.cwd() };
 const prompt = buildCopilotPrompt('Como você investigaria uma API lenta sem interromper o serviço em produção?', 'general', true);

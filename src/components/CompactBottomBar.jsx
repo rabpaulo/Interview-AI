@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { CandidateContextEditor } from './CandidateContextEditor.jsx';
+import { AppMenu } from './AppMenu.jsx';
 import {
   Mic,
   MicOff,
-  Sparkles,
   Keyboard,
   Send,
   X,
@@ -15,8 +15,8 @@ export function CompactBottomBar({
   isProcessing,
   toggleListening,
   onSendMessage,
-  onTriggerCopilot,
   agentSettings,
+  menuProps,
 }) {
   const [showInputDrawer, setShowInputDrawer] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -75,9 +75,18 @@ export function CompactBottomBar({
       )}
 
       {/* Main Bottom Controls Bar */}
-      <div className="flex items-center justify-between gap-2">
-        {/* Left: Context & Keyboard triggers */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        {/* Left: Menu, Context & Keyboard triggers */}
         <div className="flex items-center gap-1">
+          <AppMenu
+            {...menuProps}
+            agentSettings={agentSettings}
+            onOpenChange={(open) => {
+              if (!open) return;
+              setShowContext(false);
+              setShowInputDrawer(false);
+            }}
+          />
           <button
             type="button"
             onClick={() => {
@@ -116,7 +125,7 @@ export function CompactBottomBar({
                 ? 'bg-blue-500 text-white shadow-blue-500/20 scale-105 ring-4 ring-blue-500/15'
                 : 'bg-white text-black hover:scale-105 hover:bg-zinc-200 font-bold'
             }`}
-            title={isListening ? 'Clique para parar' : 'Clique para falar (ou segure ESPAÇO)'}
+            title={isListening ? 'Clique para parar (Alt+Space)' : 'Clique para falar (Alt+Space ou segure ESPAÇO)'}
           >
             {isListening && (
               <span className="absolute inset-0 rounded-full bg-blue-400 animate-ping opacity-20 pointer-events-none" />
@@ -125,29 +134,7 @@ export function CompactBottomBar({
           </button>
         </div>
 
-        {/* Right: Fast "Diga isso" / Copilot Trigger Button */}
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() =>
-              onTriggerCopilot?.(null, {
-                provider: agentSettings?.provider,
-                model: agentSettings?.currentModelId,
-                reasoningEffort: agentSettings?.currentReasoning,
-                fastMode: agentSettings?.fastMode,
-              })
-            }
-            disabled={isProcessing}
-            className="app-primary-button flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white hover:bg-zinc-200 text-black text-xs font-semibold transition cursor-pointer disabled:opacity-40"
-            title="Pedir resposta ao copiloto para a fala mais recente (Atalho: Alt+Space ou Ctrl+D)"
-          >
-            <Sparkles size={12} className="text-blue-600" />
-            <span>Diga isso</span>
-              <kbd className="hidden min-[380px]:inline-block px-1 py-0.2 rounded bg-black/10 border border-black/10 text-[9px] font-mono text-zinc-600">
-              Alt+Space
-            </kbd>
-          </button>
-        </div>
+        <div aria-hidden="true" />
       </div>
     </div>
   );

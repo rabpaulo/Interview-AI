@@ -76,7 +76,7 @@ test('keeps quieter speech after a loud onset and returns to idle after a click'
 });
 
 test('does not let an old parec process mark a newer capture as stopped', async () => {
-  const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'perssua-fake-audio-'));
+  const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interviewai-fake-audio-'));
   const fakeParec = path.join(fakeBinDir, 'parec');
   const originalPath = process.env.PATH;
   fs.writeFileSync(fakeParec, '#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n');

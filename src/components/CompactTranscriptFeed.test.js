@@ -55,7 +55,7 @@ function createFeedHarness() {
     useLayoutEffect: effect,
     Date, setTimeout,
     navigator: { clipboard: { writeText() {} } },
-    ...Object.fromEntries(['Sparkles', 'Mic', 'Copy', 'Check', 'StopCircle', 'Clock', 'Terminal', 'Bot', 'Monitor', 'Send', 'FileText', 'RotateCw', 'Cpu', 'ArrowDown', 'FormattedAgentResponse'].map((name) => [name, name])),
+    ...Object.fromEntries(['Sparkles', 'Mic', 'Copy', 'Check', 'StopCircle', 'Clock', 'Terminal', 'Bot', 'Asterisk', 'Monitor', 'Send', 'FileText', 'RotateCw', 'Cpu', 'ArrowDown', 'FormattedAgentResponse'].map((name) => [name, name])),
   });
   vm.runInContext(code, context);
   function nodes(value) {

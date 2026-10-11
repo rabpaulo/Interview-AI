@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 export function useAgentSocket() {
   const [isConnected, setIsConnected] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [conversationIds, setConversationIds] = useState({ antigravity: null, codex: null });
+  const [conversationIds, setConversationIds] = useState({ antigravity: null, codex: null, claude: null });
   const [messages, setMessages] = useState([]);
   const [currentThought, setCurrentThought] = useState('');
   const [currentToolCall, setCurrentToolCall] = useState(null);
@@ -151,7 +151,7 @@ export function useAgentSocket() {
         if (event.activeConversationIds) {
           setConversationIds(event.activeConversationIds);
         } else {
-          setConversationIds({ antigravity: null, codex: null });
+          setConversationIds({ antigravity: null, codex: null, claude: null });
         }
         break;
 
@@ -369,6 +369,7 @@ export function useAgentSocket() {
             text: '',
             status: 'streaming',
             timestamp: Date.now(),
+            source: event.source || 'voice',
             provider: event.provider,
             model: event.model,
             reasoningEffort: event.reasoningEffort,
@@ -594,6 +595,7 @@ export function useAgentSocket() {
           text: '',
           status: 'streaming',
           timestamp: Date.now(),
+          source,
           provider: payload.provider,
           model: payload.model,
           reasoningEffort: payload.reasoningEffort,
@@ -656,7 +658,7 @@ export function useAgentSocket() {
     setCurrentThought('');
     setCurrentToolCall(null);
     setIsProcessing(false);
-    setConversationIds({ antigravity: null, codex: null });
+    setConversationIds({ antigravity: null, codex: null, claude: null });
 
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: 'reset_session', provider }));
