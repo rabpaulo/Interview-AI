@@ -17,11 +17,16 @@ import {
 } from 'lucide-react';
 
 import { getPersonaById } from '../config/personas.js';
+import { AUTO_LANGUAGE, LANGUAGES } from '../../shared/language.js';
+
+const LANGUAGE_OPTIONS = [AUTO_LANGUAGE, ...LANGUAGES];
+const languageLabel = (language) => language.split('-')[0].toUpperCase();
 import { useWindowOpacity, MIN_OPACITY, MAX_OPACITY } from '../hooks/useWindowOpacity.js';
 
 export function AppMenu({
   language,
   setLanguage,
+  detectedLanguage,
   agentSettings,
   selectedPersona,
   onOpenModelModal,
@@ -56,12 +61,12 @@ export function AppMenu({
   }, [isOpen]);
 
   useEffect(() => {
-    window.perssuaDesktop?.getAlwaysOnTop?.().then((pinned) => setIsPinned(!!pinned));
+    window.interviewaiDesktop?.getAlwaysOnTop?.().then((pinned) => setIsPinned(!!pinned));
   }, []);
 
   const handleTogglePin = async () => {
-    if (window.perssuaDesktop?.toggleAlwaysOnTop) {
-      setIsPinned(!!(await window.perssuaDesktop.toggleAlwaysOnTop()));
+    if (window.interviewaiDesktop?.toggleAlwaysOnTop) {
+      setIsPinned(!!(await window.interviewaiDesktop.toggleAlwaysOnTop()));
     } else {
       setIsPinned(!isPinned);
     }
@@ -75,7 +80,7 @@ export function AppMenu({
   const { provider, currentProviderConfig, currentModel, fastMode } = agentSettings;
   const currentPersona = getPersonaById(selectedPersona);
   const ProviderIcon = provider === 'codex' ? Bot : provider === 'claude' ? Asterisk : Sparkles;
-  const needsCompositor = window.perssuaDesktop?.usesCssOpacity;
+  const needsCompositor = window.interviewaiDesktop?.usesCssOpacity;
 
   return (
     <div ref={menuRef} className="relative">
@@ -112,12 +117,14 @@ export function AppMenu({
           <button
             type="button"
             role="menuitem"
-            onClick={() => setLanguage(language === 'pt-BR' ? 'en-US' : 'pt-BR')}
+            onClick={() => setLanguage(LANGUAGE_OPTIONS[(LANGUAGE_OPTIONS.indexOf(language) + 1) % LANGUAGE_OPTIONS.length])}
             className="app-menu-item"
           >
             <Languages size={14} className="text-zinc-400 shrink-0" />
             <span className="text-zinc-400">Idioma</span>
-            <span className="ml-auto text-zinc-100 font-semibold">{language === 'pt-BR' ? 'PT' : 'EN'}</span>
+            <span className="ml-auto text-zinc-100 font-semibold">
+              {language === AUTO_LANGUAGE ? `Auto${detectedLanguage ? ` · ${languageLabel(detectedLanguage)}` : ''}` : languageLabel(language)}
+            </span>
           </button>
 
           <button type="button" role="menuitem" onClick={runAndClose(onNewSession)} className="app-menu-item">
@@ -177,11 +184,11 @@ export function AppMenu({
               <div className="app-menu-divider" />
 
               <div className="flex gap-1">
-                <button type="button" role="menuitem" onClick={runAndClose(() => window.perssuaDesktop?.minimize?.())} className="app-menu-item flex-1">
+                <button type="button" role="menuitem" onClick={runAndClose(() => window.interviewaiDesktop?.minimize?.())} className="app-menu-item flex-1">
                   <Minus size={14} className="text-zinc-400 shrink-0" />
                   <span className="text-zinc-100">Minimizar</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => window.perssuaDesktop?.close?.()} className="app-menu-item app-menu-item--danger flex-1">
+                <button type="button" role="menuitem" onClick={() => window.interviewaiDesktop?.close?.()} className="app-menu-item app-menu-item--danger flex-1">
                   <X size={14} className="shrink-0" />
                   <span>Fechar</span>
                 </button>

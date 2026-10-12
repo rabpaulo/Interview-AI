@@ -15,6 +15,7 @@ test(`backend preserves complete PC speech in ${automatic ? 'automatic' : 'manua
     fs.writeFileSync(path.join(dir, name), '#!/usr/bin/env node\n' + code);
     fs.chmodSync(path.join(dir, name), 0o755);
   };
+  fs.writeFileSync(path.join(dir, 'profile.json'), JSON.stringify({ version: 1, profile: { notes: 'Experiência real de suporte ao cliente.' } }));
   executable('pactl', "console.log(process.argv.includes('get-default-sink') ? 'test_sink' : '0\\ttest_sink\\ttest');");
   executable('python3', "console.log(JSON.stringify({text: 'Como resolvo esse problema no servidor?'}));");
   executable('parec', "const pcm=Buffer.alloc(1600); for(let i=0;i<pcm.length;i+=2) pcm.writeInt16LE(4000,i); let frames=0; setInterval(()=>process.stdout.write(++frames<=60 ? pcm : Buffer.alloc(1600)),50);");
@@ -25,7 +26,8 @@ test(`backend preserves complete PC speech in ${automatic ? 'automatic' : 'manua
   const cli = fileURLToPath(new URL('./fixtures/agy-session.cjs', import.meta.url));
   const child = spawn(process.execPath, [fileURLToPath(new URL('./index.js', import.meta.url))], {
     cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: String(port), PATH: `${dir}:${process.env.PATH}`, AGY_BIN: cli, CODEX_BIN: cli },
+    env: { ...process.env, PORT: String(port), PATH: `${dir}:${process.env.PATH}`, AGY_BIN: cli, CODEX_BIN: cli,
+      INTERVIEWAI_PROFILE_PATH: path.join(dir, 'profile.json') },
   });
   let socket;
   t.after(async () => {
@@ -52,7 +54,6 @@ test(`backend preserves complete PC speech in ${automatic ? 'automatic' : 'manua
       events.push(event);
       if (event.type === 'connection_ack') {
         socket.send(JSON.stringify({ type: 'set_auto_respond', autoRespond: automatic }));
-        socket.send(JSON.stringify({ type: 'sync_settings', candidateContext: 'Experiência real de suporte ao cliente.' }));
         socket.send(JSON.stringify({ type: 'start_pc_capture', options: { sink: 'test_sink' } }));
       }
       if (!automatic && event.type === 'pc_speech_transcribed') {

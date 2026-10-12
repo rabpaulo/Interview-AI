@@ -186,18 +186,3 @@ test('new session uses HTTP while disconnected and sends saved settings when con
   assert.equal(settings.reasoningEffort, 'low');
   assert.equal(settings.fastMode, false);
 });
-
-
-test('candidate context syncs over both transports, reconnects and can be cleared', () => {
-  const app = createSocketHarness();
-  app.open();
-  const candidateContext = 'Trabalho com suporte e prefiro equipes colaborativas.';
-  app.state().syncSettings({ candidateContext });
-  assert.equal(app.sent.at(-1).candidateContext, candidateContext);
-  assert.equal(JSON.parse(app.requests.at(-1).options.body).candidateContext, candidateContext);
-  app.open();
-  assert.equal(app.sent.filter((event) => event.type === 'sync_settings').at(-1).candidateContext, candidateContext);
-  app.state().syncSettings({ candidateContext: '' });
-  assert.equal(app.sent.at(-1).candidateContext, '');
-  assert.equal(JSON.parse(app.requests.at(-1).options.body).candidateContext, '');
-});

@@ -30,7 +30,7 @@ export function useWindowOpacity() {
   // transparent (CSS-faded) window, so it is only offered where that exists.
   const [solidText, setSolidTextState] = useState(() => readStorage(SOLID_TEXT_KEY) !== 'false');
 
-  const desktop = window.perssuaDesktop;
+  const desktop = window.interviewaiDesktop;
   const canSolidText = !!desktop?.usesCssOpacity;
 
   useEffect(() => {

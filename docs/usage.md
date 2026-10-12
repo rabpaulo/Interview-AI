@@ -8,24 +8,24 @@ O app prepara a sessão do agente sem enviar uma pergunta. A disponibilidade dos
 
 ## Meu contexto
 
-O ícone de pessoa na barra inferior abre o editor. Inclua fatos que possam sustentar suas respostas: função atual, tecnologias, projetos, resultados e preferências de trabalho. Um texto curto com dois exemplos concretos costuma ser suficiente para começar.
+O ícone de pessoa na barra inferior abre o editor em tela cheia. Um ponto azul no ícone indica que o perfil ainda está vazio. Preencha apenas fatos que você consiga sustentar na entrevista; campos vazios são ignorados.
 
-| Ação | Comportamento |
+| Aba | Campos |
 | --- | --- |
-| Carregar contexto.md | Lê o arquivo na raiz do projeto e preenche o rascunho. |
-| Criar do zero | Limpa o rascunho para escrever outro contexto. |
-| Salvar contexto | Aplica o texto às próximas sugestões do copiloto. |
-| Cancelar ou fechar | Descarta a edição e preserva o contexto salvo. |
+| Perfil | Nome, cargo atual, anos de experiência, nível, **linguagem preferida**, tecnologias (Enter ou vírgula para adicionar) e resumo profissional. |
+| Experiências | Até 8 histórias reais, cada uma com título e descrição (problema, o que você fez, resultado). |
+| Vaga | Empresa, vaga, requisitos e motivação. **Limpar vaga** apaga só essa aba, para a próxima entrevista. |
+| Extras | Notas livres (pretensão, disponibilidade, inglês…), **Importar contexto.md** e a prévia do texto enviado à IA. |
 
-O editor aceita até 6.000 caracteres, contando também os campos guiados. A importação informa erro se o arquivo estiver ausente, vazio, inacessível ou acima do limite; o rascunho anterior é preservado. O app não escreve no arquivo ao salvar e não acompanha alterações nele automaticamente.
+A linguagem preferida (por exemplo, TypeScript) vira o padrão das soluções de código no chat e é citada nas sugestões faladas, a menos que a pergunta peça outra linguagem.
 
-Em **Preparar uma experiência real**, descreva o problema, sua participação, decisões, resultado e aprendizado. Os campos são opcionais: espaços vazios não viram fatos e não há preenchimento automático de resultados. Use **Incluir experiência e preparar outra** para acrescentar mais histórias. Em **Preparar a entrevista atual**, informe a vaga, requisitos e seus motivos reais. **Salvar contexto** inclui todos os campos preenchidos, mesmo sem usar o botão de incluir experiência. Cancelar descarta o rascunho inteiro.
+**Salvar** (ou Ctrl+S) grava todas as abas de uma vez. Fechar com alterações pendentes pede confirmação antes de descartar. O contexto completo aceita até 8.000 caracteres; o contador fica no rodapé.
 
-O contexto salvo fica no armazenamento local do frontend e é sincronizado com o backend. Ele acompanha os pedidos de **Diga isso**, tanto automáticos quanto manuais. Mensagens digitadas e mensagens do microfone seguem o fluxo direto do agente, sem acrescentar esse campo ao prompt de cada pedido.
+O perfil é salvo pelo backend em `~/.local/share/interviewai/profile.json` (ou `$XDG_DATA_HOME/interviewai/profile.json`). O arquivo fica fora dos dados do Electron e do armazenamento do navegador, então continua disponível ao reiniciar o app, iniciar uma **Nova Sessão**, limpar os dados do app, trocar entre desenvolvimento e AppImage ou reinstalar. A variável `INTERVIEWAI_PROFILE_PATH` troca o local. Um contexto salvo por versões anteriores no armazenamento local é migrado automaticamente para as notas na primeira abertura.
 
-Para deixar de anexar o contexto, apague o texto e salve. Isso não remove informações já enviadas à conversa do provedor. **Nova Sessão** reinicia a conversa no app, mas mantém o contexto e as preferências salvas. Se quiser começar sem os dados anteriores, limpe o contexto e inicie uma nova sessão.
+O contexto acompanha os pedidos de **Diga isso**, tanto automáticos quanto manuais. Mensagens digitadas e do microfone seguem o fluxo direto do agente e recebem apenas a linguagem preferida.
 
-O arquivo `contexto.md` permanece fora do Git. As preferências locais dependem da origem usada pelo frontend: abrir por outra porta ou alternar entre desenvolvimento e build pode apresentar outro armazenamento local.
+Para deixar de anexar o contexto, limpe os campos e salve. Isso não remove informações já enviadas à conversa do provedor. **Importar contexto.md** acrescenta o arquivo da raiz do projeto às notas; o app não escreve nesse arquivo e não acompanha alterações nele.
 
 ## Áudio e respostas
 

@@ -222,3 +222,29 @@ test('stopping capture while waiting for context discards the held audio', async
   assert.equal(calls, 1);
   assert.deepEqual(app.prompts, []);
 });
+
+test('PC speech detects the language per utterance', async () => {
+  const engine = new SystemAudioEngine();
+  const events = [];
+  const requests = [];
+  const spoken = ['en-US', 'en-US', 'pt-BR'];
+  wirePcTranscription(engine, {
+    transcribe: async (wav, language) => {
+      requests.push(language);
+      const detected = spoken.shift();
+      return { text: detected === 'en-US' ? 'tell me about yourself' : 'fale sobre você', language: detected };
+    },
+    getLanguage: () => 'auto',
+    broadcast: (event) => events.push(event),
+    onFinal: () => {},
+  });
+  const header = Buffer.alloc(44);
+  const window = (utteranceId, sequence, final) => ({ wavBuffer: Buffer.concat([header, pcm(500)]), utteranceId, sequence, overlapBytes: 0 , final });
+  engine.emit('speech_chunk', window('a', 0, false));
+  engine.emit('speech_segment', { ...window('a', 1), durationSec: 1 });
+  await tick(); await tick(); await tick();
+  engine.emit('speech_segment', { ...window('b', 0), durationSec: 1 });
+  await tick(); await tick(); await tick();
+  assert.deepEqual(requests, ['pt-BR,en-US', 'en-US', 'en-US,pt-BR']);
+  assert.deepEqual(events.filter((event) => event.type === 'pc_speech_transcribed').map((event) => event.language), ['en-US', 'pt-BR']);
+});

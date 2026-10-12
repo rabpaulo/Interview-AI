@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { CandidateContextEditor } from './CandidateContextEditor.jsx';
 import { AppMenu } from './AppMenu.jsx';
 import {
   Mic,
@@ -16,11 +15,12 @@ export function CompactBottomBar({
   toggleListening,
   onSendMessage,
   agentSettings,
+  onOpenContext,
+  hasContext,
   menuProps,
 }) {
   const [showInputDrawer, setShowInputDrawer] = useState(false);
   const [textInput, setTextInput] = useState('');
-  const [showContext, setShowContext] = useState(false);
 
   const handleTextSubmit = (e) => {
     e.preventDefault();
@@ -37,13 +37,6 @@ export function CompactBottomBar({
 
   return (
     <div className="app-bottom-bar relative px-4 py-2.5">
-      {showContext && (
-        <CandidateContextEditor
-          initialContext={agentSettings.candidateContext || ''}
-          onSave={(text) => { agentSettings.setCandidateContext(text); setShowContext(false); }}
-          onClose={() => setShowContext(false)}
-        />
-      )}
       {/* Keyboard Input Drawer */}
       {showInputDrawer && (
         <form onSubmit={handleTextSubmit} className="mb-2 flex items-center gap-1.5">
@@ -82,27 +75,25 @@ export function CompactBottomBar({
             {...menuProps}
             agentSettings={agentSettings}
             onOpenChange={(open) => {
-              if (!open) return;
-              setShowContext(false);
-              setShowInputDrawer(false);
+              if (open) setShowInputDrawer(false);
             }}
           />
           <button
             type="button"
             onClick={() => {
-              setShowContext(!showContext);
               setShowInputDrawer(false);
+              onOpenContext();
             }}
             aria-label="Meu contexto"
-            aria-expanded={showContext}
-            title="Meu contexto para a entrevista"
-            className={`p-2 rounded-xl transition cursor-pointer ${showContext ? 'bg-white/10 text-white' : 'app-quiet-button text-zinc-400'}`}
+            title={hasContext ? 'Meu contexto para a entrevista' : 'Meu contexto (vazio): preencha para respostas personalizadas'}
+            className="app-quiet-button relative p-2 rounded-xl transition cursor-pointer text-zinc-400"
           >
             <UserRound size={15} />
+            {!hasContext && <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-400" />}
           </button>
           <button
             type="button"
-            onClick={() => { setShowInputDrawer(!showInputDrawer); setShowContext(false); }}
+            onClick={() => setShowInputDrawer(!showInputDrawer)}
             className={`p-2 rounded-xl transition cursor-pointer ${
               showInputDrawer
                 ? 'bg-white/10 text-white border border-white/20'

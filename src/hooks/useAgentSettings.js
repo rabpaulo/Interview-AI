@@ -49,30 +49,25 @@ export function useAgentSettings() {
     return true;
   });
 
-  const [candidateContext, setCandidateContext] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      return typeof saved.candidateContext === 'string' ? saved.candidateContext.slice(0, 6000) : '';
-    } catch { return ''; }
-  });
-
   // Persist to localStorage
   useEffect(() => {
     try {
+      // Keeps keys this hook doesn't own (e.g. a legacy context awaiting migration).
+      const previous = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({
+          ...previous,
           provider,
           models,
           reasoningEfforts,
           fastMode,
-          candidateContext,
         })
       );
     } catch (e) {
       console.warn('Failed to save agent settings:', e);
     }
-  }, [provider, models, reasoningEfforts, fastMode, candidateContext]);
+  }, [provider, models, reasoningEfforts, fastMode]);
 
   const setProvider = (newProvider) => {
     if (PROVIDERS[newProvider]) {
@@ -123,8 +118,6 @@ export function useAgentSettings() {
     fastMode,
     setFastMode,
     toggleFastMode,
-    candidateContext,
-    setCandidateContext,
     currentProviderConfig,
     currentModelId,
     currentModel,

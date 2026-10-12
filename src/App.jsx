@@ -6,20 +6,33 @@ import { CompactAudioMeters } from './components/CompactAudioMeters.jsx';
 import { CompactBottomBar } from './components/CompactBottomBar.jsx';
 import { ModelSelectorModal } from './components/ModelSelectorModal.jsx';
 import { PersonaSelectorModal } from './components/PersonaSelectorModal.jsx';
+import { CandidateContextEditor } from './components/CandidateContextEditor.jsx';
 import { useVoiceCopilot } from './hooks/useVoiceCopilot.js';
 import { useAgentSocket } from './hooks/useAgentSocket.js';
 import { useAgentSettings } from './hooks/useAgentSettings.js';
+import { useCandidateProfile } from './hooks/useCandidateProfile.js';
+import { AUTO_LANGUAGE } from '../shared/language.js';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('transcription'); // transcription | session | summary
-  const [language, setLanguage] = useState('pt-BR');
+  const [language, setLanguage] = useState(() => {
+    try {
+      return localStorage.getItem('interviewai_language_v1') || AUTO_LANGUAGE;
+    } catch {
+      return AUTO_LANGUAGE;
+    }
+  });
+  const [detectedLanguage, setDetectedLanguage] = useState(null);
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false);
+  const [isContextOpen, setIsContextOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionToast, setSessionToast] = useState(null);
 
   // Agent Settings (Provider: Antigravity / Codex, Model, Reasoning Effort, Fast Mode)
   const agentSettings = useAgentSettings();
+  // Candidate profile, persisted by the backend in a file outside the app's own data.
+  const candidateProfile = useCandidateProfile();
 
   // Agent WebSocket connection hook with PC Loopback & Copilot
   const {
@@ -32,6 +45,8 @@ export default function App() {
     abortAgent,
     resetSession,
     syncSettings,
+    syncLanguage,
+    pcDetectedLanguage,
 
     pcAudioLevel,
     isPcCapturing,
@@ -55,7 +70,6 @@ export default function App() {
       model: agentSettings.currentModelId,
       reasoningEffort: agentSettings.currentReasoning,
       fastMode: agentSettings.fastMode,
-      candidateContext: agentSettings.candidateContext,
     });
   }, [
     syncSettings,
@@ -63,8 +77,14 @@ export default function App() {
     agentSettings.currentModelId,
     agentSettings.currentReasoning,
     agentSettings.fastMode,
-    agentSettings.candidateContext,
   ]);
+
+  useEffect(() => {
+    syncLanguage(language);
+    try {
+      localStorage.setItem('interviewai_language_v1', language);
+    } catch {}
+  }, [syncLanguage, language]);
 
   // Callback when a final voice message is recognized
   const handleFinalTranscript = useCallback(
@@ -99,10 +119,15 @@ export default function App() {
     toggleListening,
     startRecording,
     cancelRecording,
+    detectedLanguage: micDetectedLanguage,
   } = useVoiceCopilot({
     language,
     onFinalTranscript: handleFinalTranscript,
   });
+
+  // Whichever side spoke last decides the language shown in the menu.
+  useEffect(() => { if (micDetectedLanguage) setDetectedLanguage(micDetectedLanguage); }, [micDetectedLanguage]);
+  useEffect(() => { if (pcDetectedLanguage) setDetectedLanguage(pcDetectedLanguage); }, [pcDetectedLanguage]);
 
   // Nova Sessão: limpa todo o chat, reseta cronômetro, aborta processos e reinicia do zero
   const handleNewSession = useCallback(() => {
@@ -278,7 +303,7 @@ export default function App() {
           isTranscribing={isTranscribing}
           isProcessing={isProcessing}
           elapsedSeconds={elapsedSeconds}
-          isDraggable={!isModelModalOpen && !isPersonaModalOpen}
+          isDraggable={!isModelModalOpen && !isPersonaModalOpen && !isContextOpen}
         />
 
         {/* Core Feed ("Mostra só o que deve mostrar") */}
@@ -323,9 +348,12 @@ export default function App() {
           toggleListening={toggleListening}
           onSendMessage={sendMessage}
           agentSettings={agentSettings}
+          onOpenContext={() => setIsContextOpen(true)}
+          hasContext={!candidateProfile.isEmpty}
           menuProps={{
             language,
             setLanguage,
+            detectedLanguage,
             selectedPersona,
             onOpenModelModal: () => setIsModelModalOpen(true),
             onOpenPersonaModal: () => setIsPersonaModalOpen(true),
@@ -348,6 +376,18 @@ export default function App() {
         setFastMode={agentSettings.setFastMode}
         toggleFastMode={agentSettings.toggleFastMode}
       />
+
+      {isContextOpen && (
+        <CandidateContextEditor
+          profile={candidateProfile.profile}
+          file={candidateProfile.file}
+          status={candidateProfile.status}
+          loadError={candidateProfile.error}
+          onRetry={candidateProfile.reload}
+          onSave={candidateProfile.save}
+          onClose={() => setIsContextOpen(false)}
+        />
+      )}
 
       {/* Persona / Interview Type Modal */}
       <PersonaSelectorModal

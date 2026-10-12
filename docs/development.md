@@ -88,9 +88,10 @@ O backend não carrega `.env` automaticamente. Exporte as variáveis no shell ou
 | server/agent-bridge.js e server/codex-session.js | Processos persistentes dos CLIs. |
 | server/candidate-context.js | Leitura limitada ao contexto.md da raiz do projeto. |
 | server/conversation-memory.js | Janela de falas reais, separada de sugestões da IA, enviada a cada pedido do copiloto. |
-| shared/candidate-profile.js | Montagem do contexto com experiências e informações da entrevista preenchidas pelo usuário. |
+| shared/candidate-profile.js | Perfil estruturado: normalização, limites e montagem do texto enviado ao modelo. |
+| server/profile-store.js | Persistência do perfil em `~/.local/share/interviewai/profile.json` (gravação atômica). |
 
-`GET /api/candidate-context/file` lê o arquivo fixo do projeto, sem aceitar um caminho do cliente. Retorna o texto ou um erro para o editor. A importação só altera o contexto ativo quando o usuário salva; a sincronização usa `/api/settings` e o evento WebSocket `sync_settings`.
+`GET /api/profile` e `PUT /api/profile` leem e gravam o perfil; o backend o carrega na inicialização e é a única fonte do contexto. `INTERVIEWAI_PROFILE_PATH` troca o arquivo (os testes usam um temporário). `GET /api/candidate-context/file` lê o `contexto.md` fixo do projeto, sem aceitar um caminho do cliente; a importação só altera o perfil quando o usuário salva.
 
 ## Verificação
 

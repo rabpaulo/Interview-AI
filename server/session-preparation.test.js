@@ -2,9 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { readCandidateContext } from './candidate-context.js';
+import { buildAgentPrompt } from './agent-prompt.js';
 
 const MODELS = { antigravity: 'gemini-3.8-flash', codex: 'gpt-6-luna', claude: 'claude-sonnet-5-5' };
 
@@ -14,8 +18,10 @@ for (const provider of Object.keys(MODELS)) {
     await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
     const port = probe.address().port;
     await new Promise((resolve) => probe.close(resolve));
+    const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interviewai-profile-'));
+    const profilePath = path.join(profileDir, 'profile.json');
     const child = spawn(process.execPath, [fileURLToPath(new URL('./index.js', import.meta.url))], {
-      stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PORT: String(port),
+      stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PORT: String(port), INTERVIEWAI_PROFILE_PATH: profilePath,
         AGY_BIN: fileURLToPath(new URL('./fixtures/agy-session.cjs', import.meta.url)),
         CODEX_BIN: fileURLToPath(new URL('./fixtures/codex-session.cjs', import.meta.url)),
         CLAUDE_BIN: fileURLToPath(new URL('./fixtures/claude-session.cjs', import.meta.url)),
@@ -29,6 +35,7 @@ for (const provider of Object.keys(MODELS)) {
         child.kill('SIGTERM');
         await exited;
       }
+      fs.rmSync(profileDir, { recursive: true, force: true });
     });
     child.stderr.resume();
     await new Promise((resolve, reject) => {
@@ -93,7 +100,7 @@ for (const provider of Object.keys(MODELS)) {
     const completed = await waitFor((e) => e.type === 'agent_done');
     assert.equal(completed.conversationId, prepared.conversationId);
     const answer = events.find((e) => e.type === 'agent_stream' && e.data.event === 'result');
-    assert.equal(answer.data.result.response, 'primeira pergunta');
+    assert.equal(answer.data.result.response, buildAgentPrompt('primeira pergunta'));
     assert.equal(answer.data.result.usage.input_tokens, 10);
     for (const transport of ['ws', 'http']) {
       const since = events.length;
@@ -107,12 +114,15 @@ for (const provider of Object.keys(MODELS)) {
     }
     // The fixture echoes the actual provider prompt, so this checks the full
     // settings -> copilot -> provider path without consuming model quota.
-    for (const candidateContext of ['Tenho experiência com atendimento e treinamento.', '']) {
-      await post('/api/settings', { candidateContext });
+    for (const notes of ['Tenho experiência com atendimento e treinamento.', '']) {
+      const saved = await fetch(`${url}/api/profile`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: { notes, preferredLanguage: 'TypeScript' } }) });
+      assert.equal(saved.ok, true);
+      assert.equal(JSON.parse(fs.readFileSync(profilePath, 'utf8')).profile.notes, notes);
       const since = events.length;
       await post('/api/copilot/trigger', { text: 'Me conte um pouco sobre você.', persona: 'interview_hr' });
       const reply = await waitFor((event) => event.type === 'copilot_completed', since);
-      assert.equal(reply.response.includes('Tenho experiência com atendimento e treinamento.'), Boolean(candidateContext));
+      assert.equal(reply.response.includes('Tenho experiência com atendimento e treinamento.'), Boolean(notes));
       assert.ok(reply.response.includes('CONTEXTO PESSOAL ATUAL'));
     }
     // Follow-up questions receive actual input through both provider bridges.

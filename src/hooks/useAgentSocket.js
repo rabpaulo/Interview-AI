@@ -34,6 +34,8 @@ export function useAgentSocket() {
   const [availableModels, setAvailableModels] = useState([]);
   const [availableSinks, setAvailableSinks] = useState([]);
   const [lastPcTranscript, setLastPcTranscript] = useState('');
+  const [pcDetectedLanguage, setPcDetectedLanguage] = useState(null);
+  const languageRef = useRef(null);
 
   const socketRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
@@ -69,6 +71,7 @@ export function useAgentSocket() {
       console.log('[WS Hook] Connected successfully to', wsUrl);
       setIsConnected(true);
       ws.send(JSON.stringify({ type: 'sync_settings', ...activeSettingsRef.current }));
+      if (languageRef.current) ws.send(JSON.stringify({ type: 'set_language', language: languageRef.current }));
       try {
         const savedPersona = localStorage.getItem('perssua_persona_v1');
         if (savedPersona) {
@@ -215,6 +218,7 @@ export function useAgentSocket() {
         setIsTranscribingPc(pendingUtterancesRef.current.size > 0);
         setPcLiveTranscripts((prev) => prev.filter((item) => item.utteranceId !== event.utteranceId));
         setLastPcTranscript(event.text);
+        if (event.language) setPcDetectedLanguage(event.language);
         setMessages((prev) => {
           const message = {
             id: `pc-${event.utteranceId || Date.now()}`,
@@ -688,7 +692,6 @@ export function useAgentSocket() {
           model: settings.model,
           reasoningEffort: settings.reasoningEffort,
           fastMode: settings.fastMode,
-          candidateContext: settings.candidateContext,
         })
       );
     }
@@ -734,6 +737,13 @@ export function useAgentSocket() {
     } catch {}
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: 'set_persona', persona }));
+    }
+  }, []);
+
+  const syncLanguage = useCallback((language) => {
+    languageRef.current = language;
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'set_language', language }));
     }
   }, []);
 
@@ -784,6 +794,7 @@ export function useAgentSocket() {
     resetSession,
     clearMessages: resetSession,
     syncSettings,
+    syncLanguage,
 
     // PC Loopback Audio & Copilot
     pcAudioLevel,
@@ -800,6 +811,7 @@ export function useAgentSocket() {
     availableModels,
     availableSinks,
     lastPcTranscript,
+    pcDetectedLanguage,
     startPcCapture,
     stopPcCapture,
     changeModel,

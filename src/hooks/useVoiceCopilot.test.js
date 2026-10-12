@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { AUTO_LANGUAGE, createUtteranceLanguage } from '../../shared/language.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -17,7 +18,7 @@ function microphoneHarness({ requestPermission, streamedText = 'Frase completa',
   const stream = { active: true, getTracks: () => [{ stop() {} }] };
   const context = vm.createContext({
     console: { log() {}, warn() {}, error() {} },
-    setTimeout, clearTimeout, Date, Blob, Uint8Array, AbortController,
+    setTimeout, clearTimeout, Date, Blob, Uint8Array, AbortController, AUTO_LANGUAGE, createUtteranceLanguage,
     navigator: { mediaDevices: { getUserMedia: requestPermission || (async () => stream) } },
     window: {
       addEventListener() {}, removeEventListener() {},

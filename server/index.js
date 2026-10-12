@@ -11,8 +11,12 @@ import { transcribeAudioBuffer } from './transcriber.js';
 import { wirePcTranscription } from './pc-transcription.js';
 import { createLiveCopilot } from './live-copilot.js';
 import { readCandidateContext } from './candidate-context.js';
+import { createProfileStore } from './profile-store.js';
+import { composeCandidateContext, MAX_CONTEXT_CHARS } from '../shared/candidate-profile.js';
 import { createConversationMemory } from './conversation-memory.js';
+import { buildAgentPrompt } from './agent-prompt.js';
 import { AVAILABLE_MODELS, AVAILABLE_PERSONAS, generateCopilotResponse } from './gemini-copilot.js';
+import { AUTO_LANGUAGE, LANGUAGES } from '../shared/language.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,10 +61,13 @@ let selectedModel = 'gemini-3.8-flash';
 let selectedReasoningEffort = 'medium';
 let selectedFastMode = true;
 let selectedPersona = 'general';
-let candidateContext = '';
+const profileStore = createProfileStore();
+let candidateProfile = await profileStore.load();
+let candidateContext = composeCandidateContext(candidateProfile);
+console.log(`[Profile] Using ${profileStore.file}`);
 let autoRespond = true;
 let lastPcTranscript = '';
-let activeLanguage = 'pt-BR';
+let activeLanguage = AUTO_LANGUAGE;
 const conversationMemory = createConversationMemory();
 
 function broadcast(data) {
@@ -100,8 +107,7 @@ function prepareSelectedSession() {
     });
 }
 
-function syncAgentSettings({ provider, model, reasoningEffort, fastMode, candidateContext: context }) {
-  if (typeof context === 'string') candidateContext = context.trim().slice(0, 6000);
+function syncAgentSettings({ provider, model, reasoningEffort, fastMode }) {
   const changed = (provider && provider !== selectedProvider) || (model && model !== selectedModel)
     || (reasoningEffort && reasoningEffort !== selectedReasoningEffort)
     || (fastMode !== undefined && !!fastMode !== selectedFastMode);
@@ -314,9 +320,31 @@ app.get('/api/candidate-context/file', async (req, res) => {
   res.status(status).json(body);
 });
 
+app.get('/api/profile', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ profile: candidateProfile, file: profileStore.file });
+});
+
+app.put('/api/profile', async (req, res) => {
+  const profile = req.body?.profile;
+  if (!profile || typeof profile !== 'object') return res.status(400).json({ error: 'Perfil inválido.' });
+  const context = composeCandidateContext(profile);
+  if (context.length > MAX_CONTEXT_CHARS) {
+    return res.status(400).json({ error: `O contexto ultrapassa ${MAX_CONTEXT_CHARS.toLocaleString('pt-BR')} caracteres. Reduza alguns campos.` });
+  }
+  try {
+    candidateProfile = await profileStore.save(profile);
+    candidateContext = composeCandidateContext(candidateProfile);
+    res.json({ profile: candidateProfile, file: profileStore.file });
+  } catch (error) {
+    console.error(`[Profile] Could not save ${profileStore.file}: ${error.message}`);
+    res.status(500).json({ error: 'Não foi possível salvar o perfil no disco.' });
+  }
+});
+
 app.post('/api/settings', (req, res) => {
-  const { provider, model, reasoningEffort, fastMode, candidateContext } = req.body || {};
-  syncAgentSettings({ provider, model, reasoningEffort, fastMode, candidateContext });
+  const { provider, model, reasoningEffort, fastMode } = req.body || {};
+  syncAgentSettings({ provider, model, reasoningEffort, fastMode });
   broadcast({
     type: 'settings_synced',
     provider: selectedProvider,
@@ -384,7 +412,8 @@ app.post(
     }
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
-    const result = await transcribeAudioBuffer(req.body, req.query.lang || 'pt-BR', { signal: controller.signal });
+    const requested = String(req.query.lang || 'pt-BR').split(',').filter((language) => LANGUAGES.includes(language));
+    const result = await transcribeAudioBuffer(req.body, requested.join(',') || 'pt-BR', { signal: controller.signal });
     if (!controller.signal.aborted) res.json(result);
   }
 );
@@ -419,7 +448,7 @@ app.post('/api/message', (req, res) => {
     model,
     reasoningEffort,
     fastMode,
-    prompt: text.trim(),
+    prompt: buildAgentPrompt(text.trim(), candidateProfile),
     conversationId: convId,
     cwd: process.cwd(),
     onMessage: (eventData) => {
@@ -582,7 +611,7 @@ function handleClientMessage(ws, data) {
   }
 
   if (type === 'set_language') {
-    if (data.language) activeLanguage = data.language;
+    if (data.language === AUTO_LANGUAGE || LANGUAGES.includes(data.language)) activeLanguage = data.language;
     return;
   }
 
@@ -639,7 +668,7 @@ function handleClientMessage(ws, data) {
       model,
       reasoningEffort,
       fastMode,
-      prompt,
+      prompt: buildAgentPrompt(prompt, candidateProfile),
       conversationId: currentConvId,
       cwd: process.cwd(),
       onMessage: (eventData) => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { startMicrophoneTranscription } from '../audio/microphone-transcription.js';
+import { AUTO_LANGUAGE, createUtteranceLanguage } from '../../shared/language.js';
 
 function stopRecognitionAndWait(recognition, timeoutMs = 800) {
   if (!recognition) return Promise.resolve();
@@ -34,7 +35,7 @@ function stopRecognitionAndWait(recognition, timeoutMs = 800) {
  * 5. Spacebar Push-To-Talk
  */
 export function useVoiceCopilot({
-  language = 'pt-BR',
+  language = AUTO_LANGUAGE,
   onFinalTranscript,
   enabled = true,
 }) {
@@ -46,6 +47,7 @@ export function useVoiceCopilot({
   const [micPermission, setMicPermission] = useState('prompt'); // 'prompt' | 'granted' | 'denied'
   const [errorMessage, setErrorMessage] = useState(null);
   const [isPushToTalkActive, setIsPushToTalkActive] = useState(false);
+  const [detectedLanguage, setDetectedLanguage] = useState(null);
 
   // Audio refs
   const audioContextRef = useRef(null);
@@ -66,6 +68,14 @@ export function useVoiceCopilot({
   const fallbackControllerRef = useRef(null);
   const mountedRef = useRef(true);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
+  // Last language heard in auto mode: preferred on ties and used by Web Speech,
+  // which cannot detect the language itself.
+  const lastLanguageRef = useRef(null);
+  const rememberLanguage = useCallback((detected) => {
+    if (!detected) return;
+    lastLanguageRef.current = detected;
+    setDetectedLanguage(detected);
+  }, []);
 
   useEffect(() => {
     onFinalTranscriptRef.current = onFinalTranscript;
@@ -227,6 +237,7 @@ export function useVoiceCopilot({
     // generation prevents late worklet setup/results from leaking into a new turn.
     startMicrophoneTranscription(audioContextRef.current, stream, {
       language,
+      preferredLanguage: lastLanguageRef.current,
       onPartial: (text) => {
         if (mountedRef.current && generation === recordingGenerationRef.current) setInterimTranscript(text);
       },
@@ -274,7 +285,7 @@ export function useVoiceCopilot({
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = language;
+        recognition.lang = language === AUTO_LANGUAGE ? lastLanguageRef.current || 'pt-BR' : language;
 
         recognition.onresult = (event) => {
           if (recognitionRef.current !== recognition) return;
@@ -348,6 +359,7 @@ export function useVoiceCopilot({
         setIsTranscribing(false);
         if (recognitionRef.current === recognition) recognitionRef.current = null;
         if (streamed?.text) {
+          rememberLanguage(streamed.language);
           onFinalTranscriptRef.current?.(streamed.text);
           setInterimTranscript('');
           speechRecognizedTextRef.current = '';
@@ -379,7 +391,8 @@ export function useVoiceCopilot({
 
             const controller = new AbortController();
             fallbackControllerRef.current = controller;
-            const res = await fetch(`/api/transcribe?lang=${encodeURIComponent(language)}`, {
+            const lang = createUtteranceLanguage(language, lastLanguageRef.current).request;
+            const res = await fetch(`/api/transcribe?lang=${encodeURIComponent(lang)}`, {
               method: 'POST',
               headers: {
                 'Content-Type': blob.type || 'audio/webm',
@@ -395,6 +408,7 @@ export function useVoiceCopilot({
 
             if (data.text?.trim()) {
               console.log('[VoiceCopilot] Server transcribed:', data.text);
+              if (language === AUTO_LANGUAGE) rememberLanguage(data.language);
               onFinalTranscriptRef.current?.(data.text.trim());
             } else if (data.error) {
               console.warn('[VoiceCopilot] Transcribe error:', data.error);
@@ -427,13 +441,14 @@ export function useVoiceCopilot({
       if (recognitionRef.current === recognition) recognitionRef.current = null;
 
       const text = streamed?.text || speechRecognizedTextRef.current.trim();
+      if (streamed?.text) rememberLanguage(streamed.language);
       if (text) {
         onFinalTranscriptRef.current?.(text);
         setInterimTranscript('');
         speechRecognizedTextRef.current = '';
       }
     }
-  }, [language]);
+  }, [language, rememberLanguage]);
 
   const cancelRecording = useCallback(() => {
     ++recordingGenerationRef.current;
@@ -532,6 +547,7 @@ export function useVoiceCopilot({
     errorMessage,
     clearError: () => setErrorMessage(null),
     isPushToTalkActive,
+    detectedLanguage,
     toggleListening,
     startRecording,
     stopRecording,

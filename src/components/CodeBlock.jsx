@@ -1,84 +1,147 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Check, Copy, Terminal } from 'lucide-react';
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import c from 'highlight.js/lib/languages/c';
+import cpp from 'highlight.js/lib/languages/cpp';
+import csharp from 'highlight.js/lib/languages/csharp';
+import go from 'highlight.js/lib/languages/go';
+import java from 'highlight.js/lib/languages/java';
+import javascript from 'highlight.js/lib/languages/javascript';
+import kotlin from 'highlight.js/lib/languages/kotlin';
+import python from 'highlight.js/lib/languages/python';
+import rust from 'highlight.js/lib/languages/rust';
+import sql from 'highlight.js/lib/languages/sql';
+import swift from 'highlight.js/lib/languages/swift';
+import typescript from 'highlight.js/lib/languages/typescript';
+import 'highlight.js/styles/github-dark.css';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { languageLabel, parseAgentResponse } from './agent-response.js';
 
-export function CodeBlock({ code, language = 'javascript' }) {
+// Languages commonly used for LeetCode-style answers.
+for (const [name, language] of Object.entries({
+  bash, c, cpp, csharp, go, java, javascript, kotlin, python, rust, sql, swift, typescript,
+})) {
+  hljs.registerLanguage(name, language);
+}
+
+function highlight(code, language) {
+  const lang = language.toLowerCase();
+  if (hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+  return hljs.highlightAuto(code).value;
+}
+
+function CopyButton({ text }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(code);
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div className="my-3 rounded-xl overflow-hidden border border-zinc-800 bg-[#0d0d12] shadow-lg">
-      <div className="flex items-center justify-between px-4 py-2 bg-zinc-900/80 border-b border-zinc-800/80 text-xs text-zinc-400">
-        <div className="flex items-center gap-2">
-          <Terminal size={14} className="text-cyan-400" />
-          <span className="font-mono uppercase font-semibold text-zinc-300">{language}</span>
+    <button type="button" onClick={handleCopy} className="code-frame__copy" title={copied ? 'Copiado' : 'Copiar código'}>
+      {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+      <span>{copied ? 'Copiado' : 'Copiar'}</span>
+    </button>
+  );
+}
+
+function CodeBody({ code, language }) {
+  const html = useMemo(() => highlight(code, language), [code, language]);
+  return (
+    <pre className="code-frame__body">
+      <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
+    </pre>
+  );
+}
+
+export function CodeBlock({ code, language = 'javascript' }) {
+  return (
+    <div className="code-frame">
+      <div className="code-frame__header">
+        <div className="code-frame__title">
+          <Terminal size={12} className="text-cyan-400" />
+          <span>{languageLabel(language)}</span>
         </div>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition text-xs cursor-pointer"
-        >
-          {copied ? (
-            <>
-              <Check size={13} className="text-emerald-400" />
-              <span className="text-emerald-400 font-medium">Copiado</span>
-            </>
-          ) : (
-            <>
-              <Copy size={13} />
-              <span>Copiar</span>
-            </>
-          )}
-        </button>
+        <CopyButton text={code} />
       </div>
-      <div className="p-4 overflow-x-auto text-xs sm:text-sm font-mono text-zinc-200 leading-relaxed">
-        <pre>
-          <code>{code}</code>
-        </pre>
-      </div>
+      <CodeBody code={code} language={language} />
     </div>
   );
 }
 
-/**
- * Helper component that renders mixed markdown text and formatted code blocks
- */
-export function FormattedAgentResponse({ text }) {
-  if (!text) return null;
-
-  // Split by markdown triple backtick blocks
-  const parts = text.split(/(```[\s\S]*?```)/g);
+/** Several code blocks of one answer (solution, other language, usage example) shown as tabs. */
+export function CodeTabs({ tabs }) {
+  const [selected, setSelected] = useState(0);
+  const active = tabs[Math.min(selected, tabs.length - 1)];
 
   return (
-    <div className="space-y-2 text-sm leading-relaxed text-zinc-200">
-      {parts.map((part, index) => {
-        if (part.startsWith('```') && part.endsWith('```')) {
-          const firstLineEnd = part.indexOf('\n');
-          let lang = 'code';
-          let codeContent = '';
+    <div className="code-frame">
+      <div className="code-frame__header">
+        <div className="code-frame__tabs" role="tablist">
+          {tabs.map((tab, index) => (
+            <button
+              key={index}
+              type="button"
+              role="tab"
+              aria-selected={tab === active}
+              onClick={() => setSelected(index)}
+              className="code-frame__tab"
+              title={tab.label}
+            >
+              <span>{tab.label}</span>
+              {!tab.closed && <span className="code-frame__streaming" aria-label="Gerando" />}
+            </button>
+          ))}
+        </div>
+        <CopyButton text={active.code} />
+      </div>
+      {active.note && (
+        <div className="code-frame__note agent-markdown">
+          <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{active.note}</ReactMarkdown>
+        </div>
+      )}
+      <CodeBody code={active.code} language={active.language} />
+    </div>
+  );
+}
 
-          if (firstLineEnd !== -1) {
-            lang = part.slice(3, firstLineEnd).trim() || 'code';
-            codeContent = part.slice(firstLineEnd + 1, -3);
-          } else {
-            codeContent = part.slice(3, -3);
-          }
+const REMARK_PLUGINS = [remarkGfm];
 
-          return <CodeBlock key={index} code={codeContent} language={lang} />;
-        }
+const MARKDOWN_COMPONENTS = {
+  // Fences are split out beforehand; this catches indented code blocks.
+  pre: ({ children }) => {
+    const child = React.Children.toArray(children)[0]?.props || {};
+    const language = /language-(\S+)/.exec(child.className || '')?.[1] || 'code';
+    return <CodeBlock code={String(child.children ?? '').replace(/\n$/, '')} language={language} />;
+  },
+  a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+  table: ({ node, ...props }) => (
+    <div className="agent-markdown__table">
+      <table {...props} />
+    </div>
+  ),
+};
 
-        // Render standard paragraphs with bolding
+/**
+ * Renders an agent reply: markdown prose, highlighted code and tabbed code groups.
+ */
+export function FormattedAgentResponse({ text }) {
+  const blocks = useMemo(() => parseAgentResponse(text || ''), [text]);
+  if (!text) return null;
+
+  return (
+    <div className="agent-markdown">
+      {blocks.map((block, index) => {
+        if (block.type === 'tabs') return <CodeTabs key={index} tabs={block.tabs} />;
+        if (block.type === 'code') return <CodeBlock key={index} code={block.code} language={block.language} />;
         return (
-          <div key={index} className="whitespace-pre-wrap">
-            {part.split('\n\n').map((paragraph, pIdx) => (
-              <p key={pIdx} className="mb-2 last:mb-0">
-                {paragraph}
-              </p>
-            ))}
-          </div>
+          <ReactMarkdown key={index} remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
+            {block.text}
+          </ReactMarkdown>
         );
       })}
     </div>

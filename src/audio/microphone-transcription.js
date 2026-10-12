@@ -1,21 +1,23 @@
 import workletUrl from './pcm-capture.worklet.js?url';
 import { PcmChunker, StreamingTranscription } from '../../shared/streaming-transcription.js';
+import { createUtteranceLanguage } from '../../shared/language.js';
 
 const loadedContexts = new WeakSet();
 
-export async function startMicrophoneTranscription(context, stream, { language, onPartial }) {
+export async function startMicrophoneTranscription(context, stream, { language: setting, preferredLanguage, onPartial }) {
   if (!context.audioWorklet) throw new Error('AudioWorklet indisponível');
   if (!loadedContexts.has(context)) {
     await context.audioWorklet.addModule(workletUrl);
     loadedContexts.add(context);
   }
+  const language = createUtteranceLanguage(setting, preferredLanguage);
   const session = new StreamingTranscription({
     transcribe: async (wav, signal) => {
-      const response = await fetch(`/api/transcribe?lang=${encodeURIComponent(language)}`, {
+      const response = await fetch(`/api/transcribe?lang=${encodeURIComponent(language.request)}`, {
         method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wav, signal,
       });
       if (!response.ok) throw new Error('Falha ao acessar o serviço de transcrição');
-      return response.json();
+      return language.observe(await response.json());
     },
     onPartial,
   });
@@ -54,7 +56,8 @@ export async function startMicrophoneTranscription(context, stream, { language, 
         chunker.finish();
         disconnect();
       }
-      return session.done;
+      const result = await session.done;
+      return result.text ? { ...result, language: language.detected } : result;
     },
     cancel() { session.cancel(); flush?.(); disconnect(); },
   };

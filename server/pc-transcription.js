@@ -1,18 +1,20 @@
 import { StreamingTranscription } from '../shared/streaming-transcription.js';
+import { createUtteranceLanguage } from '../shared/language.js';
 
 export function wirePcTranscription(engine, { transcribe, getLanguage, broadcast, onFinal, onPartial = () => {}, onCancel = () => {} }) {
   const sessions = new Map();
   let requestTail = Promise.resolve();
+  let lastLanguage = null;
 
   function sessionFor(chunk) {
     if (sessions.has(chunk.utteranceId)) return sessions.get(chunk.utteranceId);
-    const language = getLanguage();
+    const language = createUtteranceLanguage(getLanguage(), lastLanguage);
     const session = new StreamingTranscription({
       transcribe: (wav, signal) => {
         const request = requestTail.then(() => {
           if (signal.aborted) throw new Error('Transcrição cancelada');
-          return transcribe(wav, language, { signal });
-        });
+          return transcribe(wav, language.request, { signal });
+        }).then((result) => language.observe(result));
         requestTail = request.catch(() => {});
         return request;
       },
@@ -21,7 +23,8 @@ export function wirePcTranscription(engine, { transcribe, getLanguage, broadcast
         onPartial(text, chunk.utteranceId);
       },
       onFinal: (text) => {
-        broadcast({ type: 'pc_speech_transcribed', text, utteranceId: chunk.utteranceId, durationSec: session.durationSec, timestamp: Date.now() });
+        if (language.detected) lastLanguage = language.detected;
+        broadcast({ type: 'pc_speech_transcribed', text, language: language.detected, utteranceId: chunk.utteranceId, durationSec: session.durationSec, timestamp: Date.now() });
         onFinal(text, chunk.utteranceId);
       },
       onError: (error) => {

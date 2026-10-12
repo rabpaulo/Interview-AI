@@ -2,11 +2,68 @@
 import sys
 import os
 import json
+import re
 import subprocess
 import wave
+from concurrent.futures import ThreadPoolExecutor
 import speech_recognition as sr
 
+# Frequent function words. Google returns a confident-looking transcript even
+# for the wrong language, so the vocabulary is a second signal besides confidence.
+STOPWORDS = {
+    "pt": {"de", "que", "o", "a", "os", "as", "do", "da", "em", "um", "uma", "para", "com", "não",
+           "é", "eu", "você", "isso", "se", "na", "no", "mais", "como", "mas", "por", "ele", "ela",
+           "tem", "meu", "minha", "sua", "seu", "está", "foi", "são", "também", "então", "aqui"},
+    "en": {"the", "and", "is", "you", "to", "of", "it", "in", "that", "what", "i", "a", "an", "do",
+           "this", "are", "was", "for", "with", "have", "how", "can", "your", "my", "we", "be",
+           "not", "on", "about", "would", "so", "me", "there", "they", "tell", "why", "will"},
+}
+
+
+def score(language, response):
+    alternatives = response.get("alternative") if isinstance(response, dict) else None
+    if not alternatives:
+        return None
+    text = alternatives[0].get("transcript", "").strip()
+    if not text:
+        return None
+    # Confidence is occasionally omitted; treat that as an average result.
+    confidence = alternatives[0].get("confidence", 0.6)
+    words = re.findall(r"[^\W\d_]+", text.lower())
+    vocabulary = STOPWORDS.get(language.split("-")[0].lower(), set())
+    ratio = sum(word in vocabulary for word in words) / len(words) if words else 0
+    return {"text": text, "language": language, "score": confidence + 0.5 * ratio}
+
+
+def pick_best(results):
+    """Highest score wins; earlier languages (the caller's preference) win ties."""
+    best = None
+    for result in results:
+        if result and (best is None or result["score"] > best["score"]):
+            best = result
+    return best
+
+
+def recognize(recognizer, audio_data, languages):
+    if len(languages) == 1:
+        return {"text": recognizer.recognize_google(audio_data, language=languages[0]), "language": languages[0]}
+
+    def attempt(language):
+        try:
+            return score(language, recognizer.recognize_google(audio_data, language=language, show_all=True))
+        except sr.UnknownValueError:
+            return None
+
+    # Same latency as a single request: the languages are recognized concurrently.
+    with ThreadPoolExecutor(max_workers=len(languages)) as pool:
+        best = pick_best(list(pool.map(attempt, languages)))
+    if not best:
+        raise sr.UnknownValueError()
+    return {"text": best["text"], "language": best["language"]}
+
 def transcribe_audio(input_file, language="pt-BR"):
+    # A comma-separated list ("pt-BR,en-US") detects which language was spoken.
+    languages = [item.strip() for item in language.split(",") if item.strip()] or ["pt-BR"]
     wav_file = input_file + ".converted.wav"
     try:
         # Streaming packets are already PCM16/16 kHz/mono WAV. Avoid spawning
@@ -37,8 +94,7 @@ def transcribe_audio(input_file, language="pt-BR"):
         with sr.AudioFile(wav_file) as source:
             audio_data = recognizer.record(source)
 
-        text = recognizer.recognize_google(audio_data, language=language)
-        return {"text": text}
+        return recognize(recognizer, audio_data, languages)
     except sr.UnknownValueError:
         return {"error": "Não foi possível entender o áudio", "code": "unrecognized"}
     except sr.RequestError as e:

@@ -53,11 +53,11 @@ Para instalar as dependências de áudio e entender os modos de execução, cons
 ## Usar
 
 1. No menu (☰) da barra inferior, escolha o modelo e o modo (tipo de entrevista).
-2. Abra **Meu contexto**, no ícone de pessoa da barra inferior. Use **Carregar contexto.md** ou **Criar do zero**, revise o texto e salve.
+2. Abra **Meu contexto**, no ícone de pessoa da barra inferior. Preencha perfil (incluindo a linguagem preferida), experiências e vaga, e salve. O perfil fica em `~/.local/share/interviewai/profile.json` e persiste entre execuções.
 3. Confira a captura nos medidores de áudio. No modo automático, as falas consolidadas do PC geram sugestões; use **Diga isso** em uma fala da transcrição ou Ctrl+D para solicitar uma manualmente.
 4. Para enviar uma mensagem de voz ao agente, use o microfone ou segure **Espaço** com o app em foco.
 
-O `contexto.md` é local e está no `.gitignore`; não acompanha o clone. Importar o arquivo cria uma cópia editável no app. Alterações posteriores no arquivo exigem carregá-lo novamente.
+O `contexto.md` é local e está no `.gitignore`; não acompanha o clone. Em **Extras**, importar o arquivo acrescenta o texto às notas do perfil.
 
 O fim da fala é detectado por uma pausa de aproximadamente 900 ms. Isso pode dividir uma pergunta com pausas longas. A latência também depende da transcrição e do modelo; não há garantia de resposta instantânea.
 

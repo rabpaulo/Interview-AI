@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, session } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, session, shell } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -90,8 +90,6 @@ function createWindow() {
     y: defaultY,
     minWidth: 360,
     minHeight: 440,
-    maxWidth: 680,
-    maxHeight: 1000,
     backgroundColor: useCssOpacity ? '#00000000' : '#0c0c11',
     title: 'InterviewAI',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
@@ -105,6 +103,12 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // Links in agent answers open in the default browser, never inside the overlay.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   // Log renderer console messages to terminal
