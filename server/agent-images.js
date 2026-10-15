@@ -11,7 +11,8 @@ const FILE_TTL_MS = 60 * 60 * 1000;
 
 export const SCREENSHOT_PROMPT = 'A imagem anexada é uma captura da minha tela. Identifique a pergunta ou o problema mostrado '
   + '(por exemplo, um exercício de LeetCode com enunciado, exemplos e restrições) e resolva. '
-  + 'Se houver um editor com a assinatura da função, use a mesma linguagem e assinatura.';
+  + 'Se houver um editor com a assinatura da função, mantenha os mesmos nomes de função e parâmetros, '
+  + 'escritos na linguagem da resposta.';
 
 export function normalizeImages(images) {
   if (!Array.isArray(images)) return [];

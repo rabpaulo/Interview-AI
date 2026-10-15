@@ -20,7 +20,9 @@ A transcrição processa os blocos em ordem, com fila limitada. Quando um bloco 
 
 O copiloto mantém uma geração automática por vez. Se o modelo ficar para trás, a fala completa mais recente substitui respostas antigas ainda pendentes. As transcrições permanecem no histórico; encher a fila não reinicia o agente ativo.
 
-Antigravity e Codex preparam e reutilizam sessões de processo. A preparação não envia uma pergunta. Cancelamento, reset, erro ou mudança de configuração podem exigir uma nova preparação.
+Antigravity, Codex e Claude Code preparam e reutilizam sessões de processo. A preparação não envia uma pergunta. Cancelar uma resposta ou um erro durante a geração encerra o processo; o app inicia o substituto em seguida, com a mesma conversa, para que a próxima pergunta não espere o CLI iniciar. Reset e mudança de configuração preparam uma nova sessão.
+
+Os CLIs rodam numa pasta vazia (`interviewai-agent` no diretório temporário do sistema), fora do projeto, para não carregar repositório, AGENTS.md ou CLAUDE.md. O Claude Code roda sem ferramentas, servidores MCP, plugins e skills, e o Claude Code e o Codex usam um system prompt curto no lugar do prompt de agente de código. O Antigravity desativa a expansão de comandos e skills; ele mantém as ferramentas, pois abre as capturas de tela como arquivos.
 
 Enviar parciais à IA foi removido porque gerava respostas sem o restante da pergunta e fazia o texto completo esperar uma geração prematura terminar. A correção elimina esse trabalho especulativo, mas não reduz por si só a latência da rede ou do modelo.
 

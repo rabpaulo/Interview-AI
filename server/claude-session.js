@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import readline from 'node:readline';
 import { normalizeImages } from './agent-images.js';
+import { AGENT_SYSTEM_PROMPT } from './agent-prompt.js';
 import { killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
 
 let warmSession = null;
@@ -21,6 +22,16 @@ function dispose(session, error = new Error('Sessão Claude Code encerrada')) {
 
 export function closeClaudeSession() { dispose(warmSession); }
 
+// A cancelled or failed turn takes its CLI process with it. Starting the
+// replacement right away keeps the next question from waiting for a cold start.
+function rewarm(session) {
+  if (session.isolated) return;
+  setImmediate(() => {
+    if (warmSession && !warmSession.disposed) return;
+    try { getSession({ ...session.options, conversationId: session.conversationId }, true); } catch {}
+  });
+}
+
 // An isolated session serves a single turn and never replaces the warm session.
 function getSession({ conversationId, model = 'claude-sonnet-5-5', reasoningEffort = 'medium', cwd = process.cwd(), isolated = false }, reusePrepared = false) {
   const bin = resolveCliBin('claude');
@@ -33,7 +44,11 @@ function getSession({ conversationId, model = 'claude-sonnet-5-5', reasoningEffo
   }
   const id = conversationId || randomUUID();
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
-    '--verbose', '--include-partial-messages', '--dangerously-skip-permissions'];
+    '--verbose', '--include-partial-messages', '--dangerously-skip-permissions',
+    // Answers are plain text: no tools, MCP servers, plugins, skills or CLAUDE.md,
+    // and a short system prompt instead of the coding-agent one, so each turn starts faster.
+    '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', '--tools', '',
+    '--system-prompt', AGENT_SYSTEM_PROMPT];
   if (model) args.push('--model', model);
   if (reasoningEffort) args.push('--effort', reasoningEffort);
   if (conversationId && !unstartedIds.has(id)) args.push('--resume', id);
@@ -45,7 +60,8 @@ function getSession({ conversationId, model = 'claude-sonnet-5-5', reasoningEffo
   // An API key in the environment overrides the CLI's subscription login, so drop it.
   const { ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ...env } = process.env;
   const child = spawnCli(bin, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, PAGER: 'cat' } });
-  session = { child, key, conversationId: id, disposed: false, prepared: true, active: null };
+  session = { child, key, conversationId: id, disposed: false, prepared: true, active: null,
+    isolated, options: { model, reasoningEffort, cwd } };
   if (!isolated) warmSession = session;
   const current = session;
   const fail = (error) => {
@@ -53,6 +69,7 @@ function getSession({ conversationId, model = 'claude-sonnet-5-5', reasoningEffo
     const turn = current.active;
     dispose(current, error);
     turn?.onError?.(error);
+    if (turn) rewarm(current);
   };
   // The CLI prints nothing until it receives input, so a spawned process is ready.
   current.ready = new Promise((resolve, reject) => {
@@ -147,6 +164,10 @@ export function runClaudeAgent({ prompt, images, onMessage, onError, onClose, ..
   });
   return {
     pid: session.child.pid,
-    kill() { if (!turn.done && session.active === turn) dispose(session); },
+    kill() {
+      if (turn.done || session.active !== turn) return;
+      dispose(session);
+      rewarm(session);
+    },
   };
 }

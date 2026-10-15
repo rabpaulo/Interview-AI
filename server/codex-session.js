@@ -1,5 +1,6 @@
 import readline from 'node:readline';
 import { imageDataUrl, normalizeImages } from './agent-images.js';
+import { AGENT_SYSTEM_PROMPT } from './agent-prompt.js';
 import { killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
 
 let warmSession = null;
@@ -21,6 +22,16 @@ function dispose(session, error = new Error('Sessão Codex encerrada')) {
 
 export function closeCodexSession() { dispose(warmSession); }
 
+// A cancelled or failed turn takes its CLI process with it. Starting the
+// replacement right away keeps the next question from waiting for a cold start.
+function rewarm(session) {
+  if (session.isolated) return;
+  setImmediate(() => {
+    if (warmSession && !warmSession.disposed) return;
+    try { getSession({ ...session.options, conversationId: session.conversationId }, true); } catch {}
+  });
+}
+
 // An isolated session serves a single turn and never replaces the warm session.
 function getSession({ conversationId, model = 'gpt-6-luna', reasoningEffort = 'medium', fastMode = true, cwd = process.cwd(), isolated = false }, reusePrepared = false) {
   const bin = resolveCliBin('codex');
@@ -35,7 +46,8 @@ function getSession({ conversationId, model = 'gpt-6-luna', reasoningEffort = 'm
     '-c', 'forced_login_method="chatgpt"', '-c', 'model_provider="openai"'], {
     cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PAGER: 'cat' },
   });
-  session = { child, key, conversationId, disposed: false, prepared: true, active: null, pending: new Map(), nextId: 0 };
+  session = { child, key, conversationId, disposed: false, prepared: true, active: null, pending: new Map(), nextId: 0,
+    isolated, options: { model, reasoningEffort, fastMode, cwd } };
   if (!isolated) warmSession = session;
   const send = (message) => {
     if (session.disposed) throw new Error('Sessão Codex encerrada');
@@ -55,6 +67,7 @@ function getSession({ conversationId, model = 'gpt-6-luna', reasoningEffort = 'm
     const turn = session.active;
     dispose(session, error);
     turn?.onError?.(error);
+    if (turn) rewarm(session);
   };
   session.reader = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
   session.reader.on('line', (line) => {
@@ -128,6 +141,8 @@ function getSession({ conversationId, model = 'gpt-6-luna', reasoningEffort = 'm
     const result = await session.rpc(conversationId ? 'thread/resume' : 'thread/start', {
       ...(conversationId ? { threadId: conversationId } : {}), model, cwd,
       approvalPolicy: 'never', sandbox: 'danger-full-access', serviceTier: fastMode ? 'fast' : 'default',
+      // A short system prompt instead of the coding-agent one: answers are plain text.
+      baseInstructions: AGENT_SYSTEM_PROMPT,
       config: { model_reasoning_effort: reasoningEffort },
     });
     if (!result?.thread?.id) throw new Error('Codex não retornou o ID da thread');
@@ -168,9 +183,14 @@ export function runCodexAgent({ prompt, images, onMessage, onError, onClose, ...
     if (turn.done || session.disposed) return;
     dispose(session, error);
     onError?.(error);
+    rewarm(session);
   });
   return {
     pid: session.child.pid,
-    kill() { if (!turn.done && session.active === turn) dispose(session); },
+    kill() {
+      if (turn.done || session.active !== turn) return;
+      dispose(session);
+      rewarm(session);
+    },
   };
 }

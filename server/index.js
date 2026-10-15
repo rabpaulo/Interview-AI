@@ -3,7 +3,6 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { runUnifiedAgent, runIsolatedAgent, prepareAgentSession, closeAgentSession } from './agent-bridge.js';
@@ -14,7 +13,7 @@ import { wirePcTranscription } from './pc-transcription.js';
 import { createLiveCopilot } from './live-copilot.js';
 import { readCandidateContext } from './candidate-context.js';
 import { createProfileStore } from './profile-store.js';
-import { cliAvailable, resolveCliBin } from './cli-process.js';
+import { agentWorkspace, cliAvailable, resolveCliBin } from './cli-process.js';
 import { composeCandidateContext, MAX_CONTEXT_CHARS } from '../shared/candidate-profile.js';
 import { createConversationMemory } from './conversation-memory.js';
 import { buildAgentPrompt } from './agent-prompt.js';
@@ -109,7 +108,7 @@ function prepareSelectedSession() {
   agentSession = { status: 'starting', provider };
   broadcast({ type: 'agent_session', ...agentSession });
   prepareAgentSession({ provider, model: selectedModel, reasoningEffort: selectedReasoningEffort,
-    fastMode: selectedFastMode, conversationId: activeConversationIds[provider], cwd: process.cwd() })
+    fastMode: selectedFastMode, conversationId: activeConversationIds[provider], cwd: agentWorkspace() })
     .then(({ conversationId, pid }) => {
       if (generation !== preparationGeneration) return;
       activeConversationIds[provider] = conversationId;
@@ -248,7 +247,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
     isPreview: isPreview(),
     candidateContext,
     recentTurns: conversationMemory.beforeQuestion(transcript),
-    cwd: process.cwd(),
+    cwd: agentWorkspace(),
     onToken: (token, fullText) => {
       if (generation !== copilotGeneration || settled) return;
       broadcast({
@@ -374,7 +373,7 @@ app.post(
         // A throwaway CLI process, so the interview conversation never sees the document.
         runAgent: (prompt) => runIsolatedAgent({
           provider: selectedProvider, model: selectedModel, reasoningEffort: 'low', fastMode: true,
-          prompt, cwd: os.tmpdir(),
+          prompt, cwd: agentWorkspace(),
         }),
       });
       console.log(`[Profile] Imported ${kind} from "${filename}" (${result.chars} chars${result.warning ? ', fallback' : ''})`);
@@ -494,7 +493,7 @@ app.post('/api/message', (req, res) => {
     prompt: buildAgentPrompt(turn.request, candidateProfile),
     images: turn.images,
     conversationId: convId,
-    cwd: process.cwd(),
+    cwd: agentWorkspace(),
     onMessage: (eventData) => {
       if (eventData.result?.response) {
         finalResponse = eventData.result.response;
@@ -722,7 +721,7 @@ function handleClientMessage(ws, data) {
       prompt: buildAgentPrompt(prompt, candidateProfile),
       images: turn.images,
       conversationId: currentConvId,
-      cwd: process.cwd(),
+      cwd: agentWorkspace(),
       onMessage: (eventData) => {
         if (eventData.conversation_id) {
           activeConversationIds[provider] = eventData.conversation_id;

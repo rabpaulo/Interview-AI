@@ -44,6 +44,16 @@ const KNOWN_LOCATIONS = {
 
 const ENV_NAMES = { agy: 'AGY_BIN', codex: 'CODEX_BIN', claude: 'CLAUDE_BIN' };
 
+/**
+ * Empty working directory for the agent CLIs. Outside the project, they find no
+ * repository, AGENTS.md or CLAUDE.md to load or index before answering.
+ */
+export function agentWorkspace() {
+  const dir = path.join(os.tmpdir(), 'interviewai-agent');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /** Path of a provider CLI: the *_BIN variable, then PATH, then the usual install locations. */
 export function resolveCliBin(name, env = process.env) {
   const configured = env[ENV_NAMES[name]];

@@ -35,7 +35,7 @@ test('composes only the filled sections, in a stable order', () => {
 
 test('chat prompts default code answers to the preferred language', () => {
   assert.match(buildAgentPrompt('Resolva two sum'), /em Python se nenhuma for mencionada/);
-  assert.match(buildAgentPrompt('Resolva two sum', { preferredLanguage: 'TypeScript' }), /em TypeScript se nenhuma for mencionada/);
+  assert.match(buildAgentPrompt('Resolva two sum', { preferredLanguage: 'TypeScript' }), /em TypeScript, mesmo que o editor de uma captura de tela esteja em outra linguagem/);
 });
 
 test('company context is part of the current interview block', () => {

@@ -24,6 +24,16 @@ export function closeAgySession() {
   disposeAgySession(warmAgySession);
 }
 
+// A cancelled or failed turn takes its CLI process with it. Starting the
+// replacement right away keeps the next question from waiting for a cold start.
+function rewarmAgySession(session) {
+  if (session.isolated) return;
+  setImmediate(() => {
+    if (warmAgySession && !warmAgySession.disposed) return;
+    try { getAgySession({ ...session.options, conversationId: session.conversationId }, true); } catch {}
+  });
+}
+
 process.on('exit', closeAgySession);
 process.on('exit', closeCodexSession);
 process.on('exit', closeClaudeSession);
@@ -40,7 +50,7 @@ function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEf
     if (!isolated) disposeAgySession(session);
     const args = [
       '--input-format', 'stream-json', '--output-format', 'stream-json',
-      '--dangerously-skip-permissions',
+      '--dangerously-skip-permissions', '--disable-slash-commands',
     ];
     if (model) args.push('--model', model);
     if (reasoningEffort) args.push('--effort', reasoningEffort);
@@ -49,7 +59,8 @@ function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEf
     const child = spawnCli(agyBin, args, {
       cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PAGER: 'cat' },
     });
-    session = { child, key, conversationId, active: null, disposed: false, prepared: true };
+    session = { child, key, conversationId, active: null, disposed: false, prepared: true,
+      isolated, options: { model, reasoningEffort, cwd } };
     session.ready = new Promise((resolve, reject) => { session.resolveReady = resolve; session.rejectReady = reject; });
     session.ready.catch(() => {});
     if (!isolated) warmAgySession = session;
@@ -60,6 +71,7 @@ function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEf
       current.rejectReady(error);
       disposeAgySession(current);
       turn?.onError?.(error);
+      if (turn) rewarmAgySession(current);
     };
     current.reader = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     current.reader.on('line', (line) => {
@@ -140,7 +152,9 @@ export function runAgyAgent({ onMessage, onError, onClose, prompt, images, ...op
     pid: session.child.pid,
     kill() {
       // An old completed handle must never cancel a newer turn on this process.
-      if (!turn.done && session.active === turn) disposeAgySession(session);
+      if (turn.done || session.active !== turn) return;
+      disposeAgySession(session);
+      rewarmAgySession(session);
     },
   };
 }
