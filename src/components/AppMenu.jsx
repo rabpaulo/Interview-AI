@@ -15,6 +15,7 @@ import {
   Zap,
   Type,
   Camera,
+  Minimize2,
 } from 'lucide-react';
 
 import { getPersonaById } from '../config/personas.js';
@@ -36,6 +37,8 @@ export function AppMenu({
   onOpenPersonaModal,
   onNewSession,
   onOpenChange,
+  isCompact = false,
+  onToggleCompact,
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(true);
@@ -119,7 +122,7 @@ export function AppMenu({
       </button>
 
       {isOpen && (
-        <div role="menu" className="app-menu absolute left-0 bottom-full mb-2 z-40 w-64 rounded-xl p-1.5 text-[12px]">
+        <div role="menu" className="app-menu absolute left-0 bottom-full mb-2 z-40 w-64 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-xl p-1.5 text-[12px]">
           <button type="button" role="menuitem" onClick={runAndClose(onOpenModelModal)} className="app-menu-item">
             <ProviderIcon size={14} className="text-blue-300 shrink-0" />
             <span className="text-zinc-400">Modelo</span>
@@ -162,6 +165,22 @@ export function AppMenu({
               <span className="text-zinc-400">Captura</span>
               <span className="ml-auto truncate text-zinc-100 font-semibold">{screenshotMonitorLabel()}</span>
               <span className="text-[10px] text-zinc-500 shrink-0">{shortcutLabel(screenshot.shortcut)}</span>
+            </button>
+          )}
+
+          {onToggleCompact && (
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={isCompact}
+              onClick={runAndClose(onToggleCompact)}
+              className="app-menu-item"
+              title="Mostra só a resposta do agente, as configurações e os medidores de áudio"
+            >
+              <Minimize2 size={14} className={`shrink-0 ${isCompact ? 'text-blue-300' : 'text-zinc-400'}`} />
+              <span className="text-zinc-100">Modo compacto</span>
+              <span className="ml-auto text-[10px] text-zinc-500">Alt+C</span>
+              <span className={`app-menu-switch ${isCompact ? 'app-menu-switch--on' : ''}`} aria-hidden="true" />
             </button>
           )}
 

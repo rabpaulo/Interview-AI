@@ -4,6 +4,7 @@ import { CompactTabs } from './components/CompactTabs.jsx';
 import { CompactTranscriptFeed } from './components/CompactTranscriptFeed.jsx';
 import { CompactAudioMeters } from './components/CompactAudioMeters.jsx';
 import { CompactBottomBar } from './components/CompactBottomBar.jsx';
+import { CompactModeBar } from './components/CompactModeBar.jsx';
 import { ModelSelectorModal } from './components/ModelSelectorModal.jsx';
 import { PersonaSelectorModal } from './components/PersonaSelectorModal.jsx';
 import { CandidateContextEditor } from './components/CandidateContextEditor.jsx';
@@ -29,6 +30,14 @@ export default function App() {
   const [isContextOpen, setIsContextOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionToast, setSessionToast] = useState(null);
+  const [isCompact, setIsCompact] = useState(() => {
+    try {
+      return localStorage.getItem('interviewai_compact_v1') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleCompact = useCallback(() => setIsCompact((value) => !value), []);
 
   // Agent Settings (Provider: Antigravity / Codex, Model, Reasoning Effort, Fast Mode)
   const agentSettings = useAgentSettings();
@@ -88,6 +97,13 @@ export default function App() {
       localStorage.setItem('interviewai_language_v1', language);
     } catch {}
   }, [syncLanguage, language]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('interviewai_compact_v1', isCompact ? '1' : '0');
+    } catch {}
+    window.interviewaiDesktop?.setMode?.(isCompact ? 'compact' : 'normal');
+  }, [isCompact]);
 
   // Callback when a final voice message is recognized
   const handleFinalTranscript = useCallback(
@@ -180,6 +196,12 @@ export default function App() {
         });
       }
 
+      // Alt+C -> Modo compacto
+      if (e.altKey && e.code === 'KeyC' && !e.repeat) {
+        e.preventDefault();
+        toggleCompact();
+      }
+
       // Alt+N or Ctrl+Shift+R -> Nova Sessão
       if ((e.altKey && (e.key === 'n' || e.key === 'N')) || ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'r' || e.key === 'R'))) {
         e.preventDefault();
@@ -192,6 +214,7 @@ export default function App() {
     triggerCopilot,
     handleNewSession,
     toggleListening,
+    toggleCompact,
     agentSettings.provider,
     agentSettings.currentModelId,
     agentSettings.currentReasoning,
@@ -262,6 +285,23 @@ export default function App() {
     agentSettings.fastMode,
   ]);
 
+  const togglePcCapture = () => {
+    if (isPcCapturing) stopPcCapture();
+    else startPcCapture();
+  };
+  const isWindowDraggable = !isModelModalOpen && !isPersonaModalOpen && !isContextOpen;
+  const menuProps = {
+    language,
+    setLanguage,
+    detectedLanguage,
+    selectedPersona,
+    onOpenModelModal: () => setIsModelModalOpen(true),
+    onOpenPersonaModal: () => setIsPersonaModalOpen(true),
+    onNewSession: handleNewSession,
+    isCompact,
+    onToggleCompact: toggleCompact,
+  };
+
   return (
     <div className="app-shell text-zinc-100 flex flex-col h-dvh w-screen overflow-hidden select-none">
       {/* Frameless Desktop Window Container */}
@@ -323,20 +363,23 @@ export default function App() {
 
         {/* InterviewAI Tabs (Transcrição • Sessão • Resumo); also the window drag handle,
             released while a modal is open because drag regions swallow clicks under overlays. */}
-        <CompactTabs
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          countMessages={messages.length}
-          isListening={isListening}
-          isTranscribing={isTranscribing}
-          isProcessing={isProcessing}
-          elapsedSeconds={elapsedSeconds}
-          isDraggable={!isModelModalOpen && !isPersonaModalOpen && !isContextOpen}
-        />
+        {!isCompact && (
+          <CompactTabs
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            countMessages={messages.length}
+            isListening={isListening}
+            isTranscribing={isTranscribing}
+            isProcessing={isProcessing}
+            elapsedSeconds={elapsedSeconds}
+            isDraggable={isWindowDraggable}
+          />
+        )}
 
         {/* Core Feed ("Mostra só o que deve mostrar") */}
         <CompactTranscriptFeed
-          activeTab={activeTab}
+          activeTab={isCompact ? 'transcription' : activeTab}
+          isCompact={isCompact}
           messages={messages}
           interimTranscript={interimTranscript}
           isListening={isListening}
@@ -354,40 +397,41 @@ export default function App() {
           agentSettings={agentSettings}
         />
 
-        {/* Slim Audio Meters (Você • PC Call • Agente) */}
-        <CompactAudioMeters
-          audioLevel={audioLevel}
-          isListening={isListening}
-          isProcessing={isProcessing}
-          pcAudioLevel={pcAudioLevel}
-          isPcCapturing={isPcCapturing}
-          isPcSpeaking={isPcSpeaking}
-          onTogglePcCapture={() => {
-            if (isPcCapturing) stopPcCapture();
-            else startPcCapture();
-          }}
-          agentSettings={agentSettings}
-        />
+        {isCompact ? (
+          <CompactModeBar
+            menuProps={menuProps}
+            agentSettings={agentSettings}
+            meterProps={{ audioLevel, isListening, pcAudioLevel, isPcCapturing, isPcSpeaking, onTogglePcCapture: togglePcCapture }}
+            onExitCompact={toggleCompact}
+            isDraggable={isWindowDraggable}
+          />
+        ) : (
+          <>
+            {/* Slim Audio Meters (Você • PC Call • Agente) */}
+            <CompactAudioMeters
+              audioLevel={audioLevel}
+              isListening={isListening}
+              isProcessing={isProcessing}
+              pcAudioLevel={pcAudioLevel}
+              isPcCapturing={isPcCapturing}
+              isPcSpeaking={isPcSpeaking}
+              onTogglePcCapture={togglePcCapture}
+              agentSettings={agentSettings}
+            />
 
-        {/* Compact Bottom Controls Bar (Context • Keyboard Drawer • Mic) */}
-        <CompactBottomBar
-          isListening={isListening}
-          isProcessing={isProcessing}
-          toggleListening={toggleListening}
-          onSendMessage={sendMessage}
-          agentSettings={agentSettings}
-          onOpenContext={() => setIsContextOpen(true)}
-          hasContext={!candidateProfile.isEmpty}
-          menuProps={{
-            language,
-            setLanguage,
-            detectedLanguage,
-            selectedPersona,
-            onOpenModelModal: () => setIsModelModalOpen(true),
-            onOpenPersonaModal: () => setIsPersonaModalOpen(true),
-            onNewSession: handleNewSession,
-          }}
-        />
+            {/* Compact Bottom Controls Bar (Context • Keyboard Drawer • Mic) */}
+            <CompactBottomBar
+              isListening={isListening}
+              isProcessing={isProcessing}
+              toggleListening={toggleListening}
+              onSendMessage={sendMessage}
+              agentSettings={agentSettings}
+              onOpenContext={() => setIsContextOpen(true)}
+              hasContext={!candidateProfile.isEmpty}
+              menuProps={menuProps}
+            />
+          </>
+        )}
       </div>
 
       {/* Model & AI Settings Modal */}

@@ -30,6 +30,9 @@ export function wirePcTranscription(engine, { transcribe, getLanguage, broadcast
       onError: (error) => {
         broadcast({ type: 'pc_speech_error', error, utteranceId: chunk.utteranceId });
         onCancel(chunk.utteranceId);
+        // Without this, a long utterance keeps feeding the failed session and
+        // nothing more is transcribed until the PC audio goes quiet.
+        engine.abandonSpeech?.(chunk.utteranceId);
       },
     });
     sessions.set(chunk.utteranceId, session);

@@ -6,7 +6,10 @@ const { execFile, spawn } = require('child_process');
 
 let mainWindow = null;
 let isAlwaysOnTop = true;
-let currentMode = 'compact'; // 'compact' | 'mini'
+let currentMode = 'normal'; // 'normal' | 'compact'
+const NORMAL_MIN_SIZE = [360, 440];
+const COMPACT_MIN_SIZE = [280, 160];
+const COMPACT_HEIGHT = 300;
 let previousBounds = { width: 440, height: 620, x: undefined, y: undefined };
 let serverProcess = null;
 // Electron's native setOpacity is a no-op on Linux, so there the window is
@@ -92,8 +95,8 @@ function createWindow() {
     height: windowHeight,
     x: defaultX,
     y: defaultY,
-    minWidth: 360,
-    minHeight: 440,
+    minWidth: NORMAL_MIN_SIZE[0],
+    minHeight: NORMAL_MIN_SIZE[1],
     backgroundColor: useCssOpacity ? '#00000000' : '#0c0c11',
     title: 'InterviewAI',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
@@ -422,38 +425,38 @@ async function sendScreenshot() {
   }
 }
 
+// 'compact' shrinks the window in place (only the agent answer is shown);
+// 'normal' restores the size it had before, keeping wherever it was moved to.
 function setWindowMode(mode) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mode === currentMode || (mode === 'normal' && currentMode !== 'compact')) {
+    currentMode = mode;
+    return;
+  }
 
   currentMode = mode;
   try {
-    const currentDisplay = screen.getDisplayNearestPoint(mainWindow.getBounds());
-    const workArea = currentDisplay.workArea;
+    const bounds = mainWindow.getBounds();
+    const workArea = screen.getDisplayNearestPoint(bounds).workArea;
 
-    if (mode === 'mini') {
-      previousBounds = mainWindow.getBounds();
-      const miniWidth = 380;
-      const miniHeight = 220;
-      const x = Math.round(workArea.x + workArea.width - miniWidth - 24);
-      const y = Math.round(workArea.y + 24);
-
-      mainWindow.setAlwaysOnTop(true, 'screen-saver');
-      mainWindow.setBounds({ x, y, width: miniWidth, height: miniHeight });
+    if (mode === 'compact') {
+      previousBounds = bounds;
+      mainWindow.setMinimumSize(...COMPACT_MIN_SIZE);
+      mainWindow.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: Math.min(bounds.height, COMPACT_HEIGHT) });
     } else {
-      const targetWidth = Math.round(previousBounds?.width || 440);
-      const targetHeight = Math.round(previousBounds?.height || 620);
-      const x = previousBounds?.x !== undefined ? previousBounds.x : Math.round(workArea.x + workArea.width - targetWidth - 28);
-      const y = previousBounds?.y !== undefined ? previousBounds.y : Math.round(workArea.y + 40);
-
-      mainWindow.setAlwaysOnTop(isAlwaysOnTop, isAlwaysOnTop ? 'screen-saver' : 'normal');
-      mainWindow.setBounds({ x, y, width: targetWidth, height: targetHeight });
+      const width = Math.round(previousBounds?.width || 440);
+      const height = Math.round(previousBounds?.height || 620);
+      // Stay on screen when the compact window was moved close to an edge.
+      const x = Math.min(bounds.x, workArea.x + workArea.width - width);
+      const y = Math.min(bounds.y, workArea.y + workArea.height - height);
+      mainWindow.setMinimumSize(...NORMAL_MIN_SIZE);
+      mainWindow.setBounds({ x: Math.max(workArea.x, x), y: Math.max(workArea.y, y), width, height });
     }
   } catch (err) {
     console.error('[Electron] Error in setWindowMode:', err);
   }
 }
 
-// IPC Handlers
 ipcMain.handle('interviewai:toggle-always-on-top', () => {
   if (!mainWindow) return false;
   isAlwaysOnTop = !isAlwaysOnTop;

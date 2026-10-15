@@ -12,7 +12,7 @@ Este documento descreve o fluxo atual. As sugestões antecipadas durante a fala,
 
 O microfone finaliza ao soltar o push-to-talk ou parar a gravação e segue o fluxo de mensagem direta ao agente.
 
-Os 900 ms são um critério de silêncio, não uma garantia de pergunta completa. Uma pausa longa pode dividir o enunciado. O botão **Diga isso** usa a última transcrição consolidada, sem recompor automaticamente uma pergunta dividida em vários trechos.
+Os 900 ms são um critério de silêncio, não uma garantia de pergunta completa. Uma pausa longa pode dividir o enunciado. Áudio sem pausas é dividido após 30 s (45 s, no máximo, se não houver um ponto mais baixo). O botão **Diga isso** usa a última transcrição consolidada, sem recompor automaticamente uma pergunta dividida em vários trechos.
 
 ## Controle da espera
 

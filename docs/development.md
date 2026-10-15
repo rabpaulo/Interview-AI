@@ -111,7 +111,7 @@ O backend não carrega `.env` automaticamente. Exporte as variáveis no shell ou
 | src/audio/ | Captura PCM do microfone via AudioWorklet. |
 | shared/streaming-transcription.js | Janelas WAV, sobreposição, fila e consolidação do texto. |
 | server/index.js | API HTTP, WebSocket e coordenação da sessão. |
-| server/system-audio-engine.js | Captura (parec no Linux, PCM recebido da janela no Windows) e detecção de fala do PC. |
+| server/system-audio-engine.js | Captura (parec no Linux, PCM recebido da janela no Windows), detecção de fala do PC e divisão de áudio contínuo (`maxSpeechMs`). |
 | src/audio/system-loopback.js | Captura do loopback do sistema na janela do Electron (Windows) e envio do PCM pelo WebSocket. |
 | server/cli-process.js | Localização dos CLIs e do Python (PATH/PATHEXT), execução de atalhos `.cmd` e encerramento da árvore de processos no Windows. |
 | server/document-import.js | Extração de texto de PDF (`unpdf`), DOCX (`mammoth`), TXT e MD, prompt de organização e validação dos campos do currículo ou da vaga. |

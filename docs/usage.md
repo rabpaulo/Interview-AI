@@ -51,6 +51,12 @@ A captura do PC usa a saída de áudio padrão e tenta iniciar quando o app abre
 
 Após cerca de 900 ms de silêncio, o app encerra o trecho. Uma pausa no meio da pergunta também pode encerrá-lo: a detecção é baseada em áudio, sem análise semântica do fim da pergunta. Se isso atrapalhar a entrevista, desative o modo automático e use **Diga isso** após conferir a transcrição. O botão usa a última fala consolidada; ele não junta automaticamente vários trechos.
 
+Áudio contínuo, como um vídeo ou música sem pausas, também é dividido: após 30 s de fala, o trecho é encerrado no primeiro momento mais baixo; se o áudio não baixar, ele é encerrado aos 45 s. Se o reconhecimento de um trecho falhar, o app descarta esse trecho e começa outro com o áudio seguinte, sem esperar uma pausa.
+
+## Modo compacto
+
+Ative pelo **Menu → Modo compacto** ou com **Alt+C** (app em foco). A janela encolhe no lugar e mostra só a última resposta do agente, com as configurações do menu, os medidores do PC e do microfone (clique no medidor do PC para ligar ou desligar a captura) e o botão para voltar ao modo normal. A abas, o feed de transcrição e a barra inferior ficam ocultos. Ao voltar, a janela recupera o tamanho anterior. A escolha é lembrada entre execuções.
+
 O microfone grava uma mensagem para o agente. Clique para iniciar e parar, ou segure **Espaço** e solte para enviar. Digitar pelo botão de teclado também envia uma mensagem direta ao agente.
 
 **Diga isso** pede uma fala pronta para responder ao interlocutor, em tom profissional e conversacional. Perguntas técnicas usam conhecimento geral mesmo quando o assunto não aparece no perfil. Perguntas hipotéticas recebem uma proposta no condicional, com passos e justificativa. Para experiências passadas, o modelo deve usar somente fatos informados: pode aproveitar uma experiência relacionada e indicar uma abordagem hipotética, sem transformar isso em uma história real. Dados pessoais ausentes, como salário ou disponibilidade, continuam exigindo confirmação.
@@ -77,6 +83,7 @@ A imagem é reduzida para no máximo 1920 px no maior lado e enviada em JPEG. Um
 | Ctrl+Alt+N | Iniciar nova sessão | Global no Electron |
 | Ctrl+Alt+S | Enviar captura da tela ao agente (monitor escolhido em **Menu → Captura**; padrão: o do cursor) | Global no Electron |
 | Alt+N ou Ctrl+Shift+R | Iniciar nova sessão | App em foco |
+| Alt+C | Alternar modo compacto | App em foco |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Aumentar, diminuir ou restaurar o texto do feed (faixa de 70% a 200%, lembrada no app) | App em foco |
 | Espaço, segurando | Gravar pelo microfone; soltar envia | App em foco, fora de campos de texto |
 

@@ -110,3 +110,59 @@ export function CompactAudioMeters({
     </div>
   );
 }
+
+// Single-line meters for the compact mode bar.
+export function InlineAudioMeters({
+  audioLevel,
+  isListening,
+  pcAudioLevel = 0,
+  isPcCapturing = false,
+  isPcSpeaking = false,
+  onTogglePcCapture,
+}) {
+  const rows = [
+    {
+      label: 'PC',
+      Icon: Monitor,
+      active: isPcCapturing,
+      highlight: isPcSpeaking,
+      level: isPcCapturing ? Math.max(isPcSpeaking ? 16 : 4, pcAudioLevel) : 0,
+      onClick: onTogglePcCapture,
+      title: isPcCapturing ? 'Áudio do PC ativo · clique para desligar' : 'Áudio do PC desligado · clique para ligar',
+    },
+    {
+      label: 'Mic',
+      Icon: Mic,
+      active: isListening,
+      highlight: isListening,
+      level: isListening ? Math.max(4, audioLevel) : 0,
+      title: isListening ? 'Microfone ativo (Alt+Space)' : 'Microfone desligado (Alt+Space)',
+    },
+  ];
+
+  return (
+    <div className="flex-1 min-w-0 flex flex-col gap-1">
+      {rows.map(({ label, Icon, active, highlight, level, onClick, title }) => (
+        <div key={label} className="flex items-center gap-1.5 text-[9px]" title={title}>
+          {onClick ? (
+            <button
+              type="button"
+              onClick={onClick}
+              aria-label={title}
+              className="app-no-drag app-quiet-button p-0.5 rounded cursor-pointer"
+            >
+              <Icon size={11} className={highlight ? 'text-blue-300' : active ? 'text-zinc-300' : 'text-zinc-600'} />
+            </button>
+          ) : (
+            <span className="p-0.5">
+              <Icon size={11} className={highlight ? 'text-blue-300' : active ? 'text-zinc-300' : 'text-zinc-600'} />
+            </span>
+          )}
+          <div className="audio-level-track flex-1 h-1 rounded-full overflow-hidden">
+            <div className="audio-level-fill h-full rounded-full transition-all duration-75" style={{ width: `${level}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

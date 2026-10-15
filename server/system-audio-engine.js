@@ -39,6 +39,9 @@ export class SystemAudioEngine extends EventEmitter {
     this.silenceMsThreshold = 900; // Silence time in ms to consider speech finished
     this.minSpeechMs = 700; // Minimum speech duration to discard random clicks
     this.preSpeechBufferMs = 200;
+    // Continuous audio (a video, background music) may never pause long enough
+    // to end an utterance; past this length it is split so it still reaches the agent.
+    this.maxSpeechMs = 30000;
 
     // Internal state
     this.inSpeech = false;
@@ -54,6 +57,7 @@ export class SystemAudioEngine extends EventEmitter {
     this.silenceFlushTimer = null;
     this.flushedSilenceBytes = 0;
     this.nextSpeechId = 0;
+    this.abandonedUtteranceId = null;
     this.sampleRate = 16000;
     this.bytesPerSample = 2; // 16-bit PCM = 2 bytes
     this.channels = 1;
@@ -137,11 +141,13 @@ export class SystemAudioEngine extends EventEmitter {
       vadThreshold = 14,
       silenceMsThreshold = 900,
       minSpeechMs = 700,
+      maxSpeechMs = 30000,
     } = options;
 
     this.vadThreshold = vadThreshold;
     this.silenceMsThreshold = silenceMsThreshold;
     this.minSpeechMs = minSpeechMs;
+    this.maxSpeechMs = maxSpeechMs;
 
     if (this.source === 'renderer') return this.startRendererCapture();
 
@@ -267,6 +273,10 @@ export class SystemAudioEngine extends EventEmitter {
   processPcmChunk(chunk) {
     const numSamples = chunk.length / 2;
     if (numSamples === 0) return;
+    if (this.abandonedUtteranceId) {
+      if (this.inSpeech && this.utteranceId === this.abandonedUtteranceId) this.discardSpeech();
+      this.abandonedUtteranceId = null;
+    }
 
     let sumSquares = 0;
     for (let i = 0; i < chunk.length; i += 2) {
@@ -355,6 +365,24 @@ export class SystemAudioEngine extends EventEmitter {
         }
       }
     }
+
+    if (this.inSpeech) {
+      const speechMs = (this.speechTotalBytes / (this.sampleRate * this.bytesPerSample)) * 1000;
+      // Prefer splitting on a quieter chunk; force it if the audio never dips.
+      if (speechMs >= this.maxSpeechMs * 1.5
+        || (speechMs >= this.maxSpeechMs && normalizedLevel < this.vadThreshold)) {
+        this.finishSpeechSegment();
+      }
+    }
+  }
+
+  /**
+   * Ends an utterance whose transcription failed, so the audio that follows starts
+   * a fresh one instead of being dropped until the next pause (which continuous
+   * audio may never have). Deferred to the next chunk: callers may be inside an emit.
+   */
+  abandonSpeech(utteranceId) {
+    if (this.inSpeech && utteranceId === this.utteranceId) this.abandonedUtteranceId = utteranceId;
   }
 
   /**
@@ -448,6 +476,7 @@ export class SystemAudioEngine extends EventEmitter {
 
     this.isCapturing = false;
     this.inSpeech = false;
+    this.abandonedUtteranceId = null;
     this.rendererLeftover = Buffer.alloc(0);
     this.preSpeechChunks = [];
     this.speechStartTime = null;

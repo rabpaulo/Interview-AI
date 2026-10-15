@@ -110,12 +110,41 @@ test('a failed partial is not resurrected by the final tail', async () => {
   const app = pipeline(async () => { calls++; return { error: 'Sem conexão' }; });
   for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
   await tick();
+  const failedId = app.events.find((event) => event.type === 'pc_speech_error').utteranceId;
   for (let frame = 0; frame < 20; frame++) app.engine.processPcmChunk(pcm(4000));
   app.engine.finishSpeechSegment();
   await tick();
-  assert.equal(calls, 1);
-  assert.equal(app.events.filter((event) => event.type === 'pc_speech_error').length, 1);
+  assert.equal(app.events.filter((event) => event.type === 'pc_speech_error' && event.utteranceId === failedId).length, 1);
+  assert.ok(app.events.some((event) => event.type === 'pc_speech_end' && event.utteranceId === failedId && event.discarded));
   assert.deepEqual(app.prompts, []);
+});
+
+test('audio after a failed window starts a new utterance instead of being dropped', async () => {
+  let calls = 0;
+  const app = pipeline(async () => (++calls === 1 ? { error: 'Sem conexão' } : { text: 'Qual é a sua experiência?' }));
+  for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
+  await tick();
+  // The speaker never pauses: without a restart, everything below is lost.
+  for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
+  await tick();
+  app.engine.finishSpeechSegment();
+  await tick();
+  const starts = app.events.filter((event) => event.type === 'pc_speech_start');
+  assert.equal(starts.length, 2);
+  assert.deepEqual(app.prompts, ['Qual é a sua experiência?']);
+});
+
+test('continuous PC audio without pauses is split so it still reaches the agent', async () => {
+  const app = pipeline(async () => ({ text: 'Trecho do vídeo' }));
+  app.engine.maxSpeechMs = 3000;
+  // 10 s of uninterrupted audio and no silence at the end.
+  for (let frame = 0; frame < 200; frame++) {
+    app.engine.processPcmChunk(pcm(frame % 20 === 0 ? 1000 : 4000));
+    if (frame % 20 === 0) await tick();
+  }
+  await tick();
+  assert.ok(app.prompts.length >= 2, `expected split utterances, got ${app.prompts.length}`);
+  assert.ok(app.events.filter((event) => event.type === 'pc_speech_start').length >= 3);
 });
 
 test('manual mode still transcribes live without automatically invoking the agent', async () => {
@@ -204,7 +233,9 @@ test('unrecognized audio stays bounded and cannot produce an incomplete agent pr
   app.engine.finishSpeechSegment();
   await tick();
   assert.ok(largest <= 10);
-  assert.equal(app.events.filter((event) => event.type === 'pc_speech_error').length, 1);
+  const errors = app.events.filter((event) => event.type === 'pc_speech_error');
+  assert.ok(errors.length >= 1);
+  assert.equal(new Set(errors.map((event) => event.utteranceId)).size, errors.length, 'one error per utterance');
   assert.deepEqual(app.prompts, []);
 });
 

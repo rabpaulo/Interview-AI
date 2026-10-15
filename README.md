@@ -8,6 +8,7 @@ Copiloto desktop para entrevistas e reuniões, com transcrição de áudio e sug
 - **Contexto da vaga e da empresa**: produtos, stack e requisitos, importados da descrição da vaga ou escritos à mão, para respostas ligadas à entrevista daquele dia.
 - Sugestões em tom profissional e conversacional, com contexto pessoal editável.
 - Ctrl+Alt+S envia uma captura da tela (por exemplo, um exercício mostrado no PC) diretamente ao agente.
+- Modo compacto (Alt+C): janela pequena com só a última resposta, os medidores e o menu.
 - Integração com os CLIs autenticados do Antigravity, do Codex e do Claude Code.
 
 <p align="center">

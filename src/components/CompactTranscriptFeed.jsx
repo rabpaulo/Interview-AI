@@ -45,9 +45,14 @@ export function CompactTranscriptFeed({
   onTriggerCopilot,
   onSendMessage,
   agentSettings,
+  isCompact = false,
 }) {
   // Summary requests/replies live only in the Resumo tab.
   const messages = allMessages.filter((m) => m.source !== 'summary');
+  // Compact mode shows only the latest agent answer.
+  const feedMessages = isCompact
+    ? messages.filter((m) => m.role === 'copilot' || m.role === 'agent').slice(-1)
+    : messages;
   const summaryReply = [...allMessages].reverse().find((m) => m.source === 'summary' && m.role === 'agent');
   const [copiedId, setCopiedId] = useState(null);
   const [isFollowing, setIsFollowing] = useState(true);
@@ -69,7 +74,7 @@ export function CompactTranscriptFeed({
     if (followingRef.current && feedRef.current) {
       feedRef.current.scrollTop = feedRef.current.scrollHeight;
     }
-  }, [activeTab, messages, interimTranscript, pcLiveTranscripts, isProcessing]);
+  }, [activeTab, isCompact, messages, interimTranscript, pcLiveTranscripts, isProcessing]);
 
   const handleScroll = (event) => {
     const feed = event.currentTarget;
@@ -118,7 +123,7 @@ export function CompactTranscriptFeed({
   if (activeTab === 'transcription') {
     return renderFeed(
       <>
-        {isPcCapturing && (isPcSpeaking || isTranscribingPc) && (
+        {!isCompact && isPcCapturing && (isPcSpeaking || isTranscribingPc) && (
           <div
             role="status"
             aria-live="polite"
@@ -140,8 +145,14 @@ export function CompactTranscriptFeed({
           </div>
         )}
 
+        {isCompact && feedMessages.length === 0 && !isProcessing && (
+          <div className="h-full flex items-center justify-center text-center p-4 text-[11px] text-zinc-500">
+            {isPcSpeaking || isTranscribingPc ? 'Escutando a pergunta…' : 'A resposta do agente aparece aqui.'}
+          </div>
+        )}
+
         {/* Empty state */}
-        {messages.length === 0 && !interimTranscript && !isProcessing && !isPcSpeaking && !isTranscribingPc && (
+        {!isCompact && messages.length === 0 && !interimTranscript && !isProcessing && !isPcSpeaking && !isTranscribingPc && (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-zinc-500 min-h-[260px]">
             <div className="w-10 h-10 rounded-full bg-white/[0.04] border border-white/[0.08] flex items-center justify-center mb-2.5 text-blue-300">
               <Mic size={17} />
@@ -155,7 +166,7 @@ export function CompactTranscriptFeed({
         )}
 
         {/* Message Feed */}
-        {messages.map((item, idx) => {
+        {feedMessages.map((item, idx) => {
           const key = item.id || `msg-${idx}`;
           const isCopied = copiedId === key;
 
@@ -327,7 +338,7 @@ export function CompactTranscriptFeed({
           );
         })}
 
-        {pcLiveTranscripts.map((item) => (
+        {!isCompact && pcLiveTranscripts.map((item) => (
           <div key={item.utteranceId} className="rounded-xl border border-indigo-500/30 bg-indigo-500/[0.07] p-3" role="status" aria-live="polite">
             <div className="flex items-center gap-1.5 mb-1 text-[10px] text-indigo-300 font-bold">
               <Monitor size={12} />
@@ -338,7 +349,7 @@ export function CompactTranscriptFeed({
         ))}
 
         {/* Live speech preview while speaking */}
-        {interimTranscript && (
+        {!isCompact && interimTranscript && (
           <div className="rounded-xl border border-cyan-500/40 bg-cyan-950/30 p-2.5 shadow-sm backdrop-blur-md animate-pulse">
             <div className="flex items-center justify-between mb-1 text-[10px] text-cyan-400 font-bold">
               <div className="flex items-center gap-1.5">
