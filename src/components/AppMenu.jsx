@@ -16,6 +16,7 @@ import {
   Type,
   Camera,
   Minimize2,
+  NotebookText,
 } from 'lucide-react';
 
 import { getPersonaById } from '../config/personas.js';
@@ -35,6 +36,8 @@ export function AppMenu({
   selectedPersona,
   onOpenModelModal,
   onOpenPersonaModal,
+  onOpenNotesModal,
+  notesStatus,
   onNewSession,
   onOpenChange,
   isCompact = false,
@@ -139,6 +142,17 @@ export function AppMenu({
             <span className="ml-auto truncate text-zinc-100 font-medium">{currentPersona?.shortName || 'Reunião Geral'}</span>
             <ChevronRight size={12} className="text-zinc-500 shrink-0" />
           </button>
+
+          {onOpenNotesModal && (
+            <button type="button" role="menuitem" onClick={runAndClose(onOpenNotesModal)} className="app-menu-item">
+              <NotebookText size={14} className={`shrink-0 ${notesStatus?.connected ? 'text-emerald-300' : 'text-zinc-400'}`} />
+              <span className="text-zinc-400">Notas</span>
+              <span className="ml-auto truncate text-zinc-100 font-medium">
+                {notesStatus?.connected ? `${notesStatus.files.toLocaleString('pt-BR')} no Obsidian` : notesStatus?.error ? 'Erro' : 'Conectar'}
+              </span>
+              <ChevronRight size={12} className="text-zinc-500 shrink-0" />
+            </button>
+          )}
 
           <button
             type="button"

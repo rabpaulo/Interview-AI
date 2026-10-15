@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('interviewaiDesktop', {
   setOpacity: (value) => ipcRenderer.send('interviewai:set-opacity', value),
   usesCssOpacity: process.platform === 'linux',
 
+  // Native folder picker (Obsidian vault); resolves to a path or null.
+  pickDirectory: (title) => ipcRenderer.invoke('interviewai:pick-directory', title),
+
   // Events from Main Process (shortcuts, etc.)
   onShortcut: (callback) => {
     const handler = (_event, action) => callback(action);

@@ -572,6 +572,60 @@ html.app-solid-text .app-context-editor {
   font-size: 12px !important;
 }
 
+/* Raw note sections from the local Obsidian search, shown before the answer. */
+.app-shell .notes-card {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(52, 211, 153, 0.28);
+  border-left: 3px solid #34d399;
+  border-radius: 10px;
+  background: #0c1713;
+  font-style: normal;
+}
+
+.notes-card__header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  color: #6ee7b7;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.notes-card__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notes-card__source {
+  overflow: hidden;
+  color: #a7f3d0;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes-card__snippet {
+  margin-top: 2px;
+  color: #e4f5ec;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-line;
+  user-select: text;
+}
+
+.notes-card__snippet mark {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(52, 211, 153, 0.22);
+  color: #ffffff;
+  font-weight: 600;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

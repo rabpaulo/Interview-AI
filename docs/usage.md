@@ -45,6 +45,16 @@ O contexto acompanha os pedidos de **Diga isso**, tanto automáticos quanto manu
 
 Para deixar de anexar o contexto, limpe os campos e salve. Isso não remove informações já enviadas à conversa do provedor. **Importar contexto.md** acrescenta o arquivo da raiz do projeto às notas; o app não escreve nesse arquivo e não acompanha alterações nele.
 
+## Notas do Obsidian
+
+**Menu → Notas** conecta uma vault do Obsidian. Escolha a pasta (ou digite o caminho) e clique em **Conectar**. O backend lê os arquivos `.md` da vault, ignora `.obsidian`, `.trash` e pastas ocultas, e monta um índice de busca em memória. Cada seção da nota (cada título `#`) vira um trecho. Edições, notas novas e exclusões são reindexadas automaticamente. A pasta escolhida fica em `notes.json`, ao lado do `profile.json`, e é reconectada ao abrir o app.
+
+Durante a fala do PC, a transcrição parcial já é usada como busca. Quando aparecem trechos relacionados, um card verde **SUAS NOTAS** mostra a nota, a seção e o trecho com as palavras encontradas em destaque, antes de o modelo começar a responder. Ao consolidar a fala, os até 3 melhores trechos (no máximo 2.000 caracteres) vão no prompt do **Diga isso**, que deve usar os valores exatos das notas. Mensagens digitadas e do microfone também buscam nas notas, mostram o card e anexam os trechos.
+
+A busca é por palavras (BM25), sem acentos e com variações simples, como plural e terminações de verbo ("liderou" encontra "liderei"). Ela não entende sinônimos: se a nota diz "p99" e a pergunta diz "percentil", a nota pode não aparecer. Use os títulos das seções para nomear o assunto. Conversa casual e perguntas sem relação não trazem trechos, e nesse caso o prompt fica igual ao de antes. Use **Testar uma pergunta**, na mesma tela, para conferir o que uma pergunta encontra.
+
+São indexados até 5.000 arquivos de até 512 KB. Notas, anexos e imagens não saem do computador; só os trechos encontrados vão ao provedor, junto com a pergunta.
+
 ## Áudio e respostas
 
 A captura do PC usa a saída de áudio padrão e tenta iniciar quando o app abre. No Linux, o backend lê o monitor da saída com `parec`; no Windows, a janela do Electron captura o loopback do sistema (o que está tocando nos alto-falantes ou fones) e envia o áudio ao backend pela conexão local. Os medidores permitem acompanhar e controlar a captura. A transcrição parcial aparece enquanto a pessoa fala, mas o modo automático só envia a fala consolidada ao modelo.
@@ -94,6 +104,8 @@ Atalhos globais podem conflitar com o ambiente desktop ou com outros programas (
 O reconhecimento usa o serviço Google por meio da biblioteca Python `SpeechRecognition`. Portanto, a transcrição não é offline. O texto reconhecido e o contexto salvo são enviados ao provedor quando uma sugestão é solicitada.
 
 Currículos e descrições de vaga importados são enviados ao provedor uma vez, para organizar os campos; o arquivo não é guardado pelo app, apenas o perfil que você salvar.
+
+Dos arquivos da vault do Obsidian, só os trechos encontrados para cada pergunta vão ao provedor.
 
 Capturas de tela são enviadas ao provedor somente quando você usa Ctrl+Alt+S; não há captura contínua. Com o Antigravity, que recebe apenas texto no fluxo do agente, a imagem é gravada como arquivo temporário em `interviewai-screenshots` na pasta temporária do sistema e removida após 1 hora. Quem tiver acesso a essa pasta na máquina pode ler a captura durante esse período. Por isso, evite capturar telas com dados sensíveis que não devam ir ao provedor.
 

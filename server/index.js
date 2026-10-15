@@ -12,7 +12,8 @@ import { transcribeAudioBuffer } from './transcriber.js';
 import { wirePcTranscription } from './pc-transcription.js';
 import { createLiveCopilot } from './live-copilot.js';
 import { readCandidateContext } from './candidate-context.js';
-import { createProfileStore } from './profile-store.js';
+import { createProfileStore, defaultProfilePath } from './profile-store.js';
+import { createNotesVault, createNotesLookup, publicHit } from './notes-vault.js';
 import { agentWorkspace, cliAvailable, resolveCliBin } from './cli-process.js';
 import { composeCandidateContext, MAX_CONTEXT_CHARS } from '../shared/candidate-profile.js';
 import { createConversationMemory } from './conversation-memory.js';
@@ -72,6 +73,17 @@ let autoRespond = true;
 let lastPcTranscript = '';
 let activeLanguage = AUTO_LANGUAGE;
 const conversationMemory = createConversationMemory();
+
+// Local Obsidian vault search. It runs on partial transcripts, so by the time an
+// utterance is final its notes are already on screen and ready for the prompt.
+const notesVault = createNotesVault({
+  configFile: process.env.INTERVIEWAI_NOTES_CONFIG || path.join(path.dirname(defaultProfilePath()), 'notes.json'),
+});
+notesVault.load();
+const notesLookup = createNotesLookup({
+  search: (text) => notesVault.search(text),
+  onHits: (utteranceId, hits) => broadcast({ type: 'notes_hits', utteranceId, hits }),
+});
 
 // A screenshot sent without text gets a default request; memory keeps only a marker for the image.
 function readUserTurn({ text, images }) {
@@ -159,6 +171,7 @@ function resetAgentSession(provider) {
   systemAudioEngine.discardSpeech();
   lastPcTranscript = '';
   conversationMemory.clear();
+  notesLookup.clear();
   broadcast({ type: 'session_reset', activeConversationIds, timestamp: Date.now() });
   prepareSelectedSession();
 }
@@ -177,7 +190,7 @@ const liveCopilot = createLiveCopilot({
   enabled: () => autoRespond,
   canStart: () => !activeAgentProcess,
   start: ({ text, utteranceId, isPreview, onSettled }) => triggerCopilotForText(text, {
-    replyId: `copilot-pc-${utteranceId}`, isPreview, onSettled,
+    replyId: `copilot-pc-${utteranceId}`, utteranceId, isPreview, onSettled,
   }),
   onFinalized: (id) => broadcast({ type: 'copilot_finalized', replyId: `copilot-pc-${id}` }),
   onDiscarded: (id) => broadcast({ type: 'copilot_discarded', replyId: `copilot-pc-${id}` }),
@@ -187,11 +200,15 @@ const pcTranscription = wirePcTranscription(systemAudioEngine, {
   transcribe: transcribeAudioBuffer,
   getLanguage: () => activeLanguage,
   broadcast,
-  onPartial: (text, id) => liveCopilot.partial(text, id),
+  onPartial: (text, id) => {
+    notesLookup.lookup(id, text);
+    liveCopilot.partial(text, id);
+  },
   onCancel: (id) => liveCopilot.cancel(id),
   onFinal: (text, id) => {
     lastPcTranscript = text;
     conversationMemory.remember('interlocutor', text);
+    notesLookup.lookup(id, text);
     liveCopilot.final(text, id);
   },
 });
@@ -225,11 +242,14 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
   const reasoningEffort = overrideOptions.reasoningEffort || selectedReasoningEffort || 'medium';
   const fastMode = overrideOptions.fastMode !== undefined ? overrideOptions.fastMode : selectedFastMode;
   const convId = activeConversationIds[provider] || null;
+  // PC utterances already showed their notes card through notes_hits.
+  const notes = notesLookup.lookup(overrideOptions.utteranceId || null, transcript);
 
   broadcast({
     type: 'copilot_started',
     replyId, isPreview: isPreview(),
     prompt: transcript,
+    ...(overrideOptions.utteranceId ? {} : { notes: notes.map(publicHit) }),
     provider,
     model,
     persona,
@@ -247,6 +267,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
     isPreview: isPreview(),
     candidateContext,
     recentTurns: conversationMemory.beforeQuestion(transcript),
+    notes,
     cwd: agentWorkspace(),
     onToken: (token, fullText) => {
       if (generation !== copilotGeneration || settled) return;
@@ -385,6 +406,47 @@ app.post(
   }
 );
 
+function notesError(res, error) {
+  if (!error.status) console.error(`[Notes] ${error.message}`);
+  res.status(error.status || 500).json({ error: error.status ? error.message : 'Não foi possível indexar a vault.', status: notesVault.status });
+}
+
+app.get('/api/notes', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ status: notesVault.status });
+});
+
+app.put('/api/notes', async (req, res) => {
+  try {
+    res.json({ status: await notesVault.connect(req.body?.path) });
+  } catch (error) {
+    notesError(res, error);
+  }
+});
+
+app.post('/api/notes/reindex', async (req, res) => {
+  try {
+    res.json({ status: await notesVault.reindex() });
+  } catch (error) {
+    notesError(res, error);
+  }
+});
+
+app.delete('/api/notes', async (req, res) => {
+  try {
+    res.json({ status: await notesVault.disconnect() });
+  } catch (error) {
+    notesError(res, error);
+  }
+});
+
+// Lets the settings screen check what a question would retrieve.
+app.get('/api/notes/search', (req, res) => {
+  const started = performance.now();
+  const hits = notesVault.search(String(req.query.q || '')).map(publicHit);
+  res.json({ hits, ms: Number((performance.now() - started).toFixed(1)) });
+});
+
 app.post('/api/settings', (req, res) => {
   const { provider, model, reasoningEffort, fastMode } = req.body || {};
   syncAgentSettings({ provider, model, reasoningEffort, fastMode });
@@ -490,7 +552,7 @@ app.post('/api/message', (req, res) => {
     model,
     reasoningEffort,
     fastMode,
-    prompt: buildAgentPrompt(turn.request, candidateProfile),
+    prompt: buildAgentPrompt(turn.request, candidateProfile, notesVault.search(turn.request)),
     images: turn.images,
     conversationId: convId,
     cwd: agentWorkspace(),
@@ -686,6 +748,7 @@ function handleClientMessage(ws, data) {
 
     // Broadcast user message to UI
     conversationMemory.remember('user', turn.memory);
+    const notes = turn.images.length && !data.text?.trim() ? [] : notesVault.search(prompt);
     ws.send(
       JSON.stringify({
         type: 'user_message_acknowledged',
@@ -693,6 +756,7 @@ function handleClientMessage(ws, data) {
         images: turn.images.map(imageDataUrl),
         timestamp: Date.now(),
         source: data.source || 'voice',
+        notes: notes.map(publicHit),
         provider,
         model,
         reasoningEffort,
@@ -718,7 +782,7 @@ function handleClientMessage(ws, data) {
       model,
       reasoningEffort,
       fastMode,
-      prompt: buildAgentPrompt(prompt, candidateProfile),
+      prompt: buildAgentPrompt(prompt, candidateProfile, notes),
       images: turn.images,
       conversationId: currentConvId,
       cwd: agentWorkspace(),
@@ -793,6 +857,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     activeAgentProcess?.kill();
     closeAgentSession();
     systemAudioEngine.stopCapture();
+    notesVault.close();
     process.exit(0);
   });
 }

@@ -8,7 +8,9 @@ Este documento descreve o fluxo atual. As sugestões antecipadas durante a fala,
 2. O texto parcial aparece na interface, sem iniciar uma geração de IA.
 3. Após 300 ms de pausa, o reconhecimento do trecho pendente pode começar. A fala continua aberta até completar 900 ms de silêncio.
 4. Se o áudio voltar antes disso, os trechos continuam na mesma fala. Caso contrário, o app consolida a transcrição após concluir os pedidos de reconhecimento pendentes.
-5. No modo automático, o agendador envia o texto consolidado ao copiloto. O prompt inclui a persona e o contexto pessoal salvo.
+5. No modo automático, o agendador envia o texto consolidado ao copiloto. O prompt inclui a persona, o contexto pessoal salvo e, se houver uma vault conectada, os trechos das notas encontrados para a fala.
+
+A busca nas notas não chama o modelo nem uma ferramenta. Ela roda em memória, em poucos milissegundos, a cada transcrição parcial; o card aparece enquanto a pessoa ainda fala, e a fala consolidada só repete uma busca local antes do envio. Os trechos acrescentam até 2.000 caracteres ao prompt, e apenas quando há resultado.
 
 O microfone finaliza ao soltar o push-to-talk ou parar a gravação e segue o fluxo de mensagem direta ao agente.
 

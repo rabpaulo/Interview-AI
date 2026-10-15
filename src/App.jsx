@@ -8,10 +8,12 @@ import { CompactModeBar } from './components/CompactModeBar.jsx';
 import { ModelSelectorModal } from './components/ModelSelectorModal.jsx';
 import { PersonaSelectorModal } from './components/PersonaSelectorModal.jsx';
 import { CandidateContextEditor } from './components/CandidateContextEditor.jsx';
+import { NotesVaultModal } from './components/NotesVaultModal.jsx';
 import { useVoiceCopilot } from './hooks/useVoiceCopilot.js';
 import { useAgentSocket } from './hooks/useAgentSocket.js';
 import { useAgentSettings } from './hooks/useAgentSettings.js';
 import { useCandidateProfile } from './hooks/useCandidateProfile.js';
+import { useNotesVault } from './hooks/useNotesVault.js';
 import { useTextZoom } from './hooks/useTextZoom.js';
 import { AUTO_LANGUAGE } from '../shared/language.js';
 
@@ -28,6 +30,7 @@ export default function App() {
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false);
   const [isContextOpen, setIsContextOpen] = useState(false);
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionToast, setSessionToast] = useState(null);
   const [isCompact, setIsCompact] = useState(() => {
@@ -43,6 +46,7 @@ export default function App() {
   const agentSettings = useAgentSettings();
   // Candidate profile, persisted by the backend in a file outside the app's own data.
   const candidateProfile = useCandidateProfile();
+  const notesVault = useNotesVault();
   // Ctrl +/-/0 scale the reading feed while the window has focus.
   useTextZoom();
 
@@ -66,6 +70,7 @@ export default function App() {
     isTranscribingPc,
     pcAudioError,
     pcLiveTranscripts,
+    utteranceNotes,
     clearPcAudioError,
     autoRespond,
     selectedPersona,
@@ -289,7 +294,7 @@ export default function App() {
     if (isPcCapturing) stopPcCapture();
     else startPcCapture();
   };
-  const isWindowDraggable = !isModelModalOpen && !isPersonaModalOpen && !isContextOpen;
+  const isWindowDraggable = !isModelModalOpen && !isPersonaModalOpen && !isContextOpen && !isNotesOpen;
   const menuProps = {
     language,
     setLanguage,
@@ -297,6 +302,8 @@ export default function App() {
     selectedPersona,
     onOpenModelModal: () => setIsModelModalOpen(true),
     onOpenPersonaModal: () => setIsPersonaModalOpen(true),
+    onOpenNotesModal: () => setIsNotesOpen(true),
+    notesStatus: notesVault.status,
     onNewSession: handleNewSession,
     isCompact,
     onToggleCompact: toggleCompact,
@@ -387,6 +394,7 @@ export default function App() {
           isPcSpeaking={isPcSpeaking}
           isTranscribingPc={isTranscribingPc}
           pcLiveTranscripts={pcLiveTranscripts}
+          utteranceNotes={utteranceNotes}
           autoRespond={autoRespond}
           isProcessing={isProcessing}
           currentToolCall={currentToolCall}
@@ -460,6 +468,8 @@ export default function App() {
           onClose={() => setIsContextOpen(false)}
         />
       )}
+
+      <NotesVaultModal isOpen={isNotesOpen} onClose={() => setIsNotesOpen(false)} vault={notesVault} />
 
       {/* Persona / Interview Type Modal */}
       <PersonaSelectorModal

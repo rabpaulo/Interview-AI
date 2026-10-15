@@ -18,6 +18,7 @@ import {
   ArrowDown,
 } from 'lucide-react';
 import { FormattedAgentResponse } from './CodeBlock.jsx';
+import { NotesCard } from './NotesCard.jsx';
 
 const AGENT_STYLES = {
   antigravity: { name: 'ANTIGRAVITY', fallbackModel: 'Gemini', Icon: Sparkles, card: 'border-cyan-500/25 bg-[#0f1422]/85',
@@ -28,6 +29,9 @@ const AGENT_STYLES = {
     divider: 'border-amber-500/15', icon: 'text-amber-400', label: 'text-amber-300' },
 };
 
+// Stable default, since the feed's scroll effect depends on it.
+const NO_NOTES = {};
+
 export function CompactTranscriptFeed({
   activeTab,
   messages: allMessages,
@@ -37,6 +41,7 @@ export function CompactTranscriptFeed({
   isPcSpeaking,
   isTranscribingPc,
   pcLiveTranscripts = [],
+  utteranceNotes = NO_NOTES,
   autoRespond,
   isProcessing,
   currentToolCall,
@@ -74,7 +79,7 @@ export function CompactTranscriptFeed({
     if (followingRef.current && feedRef.current) {
       feedRef.current.scrollTop = feedRef.current.scrollHeight;
     }
-  }, [activeTab, isCompact, messages, interimTranscript, pcLiveTranscripts, isProcessing]);
+  }, [activeTab, isCompact, messages, interimTranscript, pcLiveTranscripts, utteranceNotes, isProcessing]);
 
   const handleScroll = (event) => {
     const feed = event.currentTarget;
@@ -116,6 +121,19 @@ export function CompactTranscriptFeed({
     setTimeout(() => setCopiedId(null), 1800);
   };
 
+  // Each card shows once: PC questions carry their own, and compact mode moves it
+  // onto the only answer it shows.
+  const notesFor = (item) => {
+    const id = item.id || '';
+    if (id.startsWith('pc-')) return isCompact ? null : utteranceNotes[id.slice(3)];
+    if (id.startsWith('copilot-pc-')) return isCompact ? utteranceNotes[id.slice(11)] : null;
+    if (item.role === 'agent') return isCompact ? item.notes : null;
+    return item.notes;
+  };
+  const liveNotes = isCompact
+    ? [...pcLiveTranscripts].reverse().map((item) => utteranceNotes[item.utteranceId]).find((hits) => hits?.length)
+    : null;
+
   const miniBars = frequencyBars ? frequencyBars.slice(16, 32) : [];
   const activeProviderName = agentSettings?.currentProviderConfig?.shortName || 'Agente';
 
@@ -145,7 +163,7 @@ export function CompactTranscriptFeed({
           </div>
         )}
 
-        {isCompact && feedMessages.length === 0 && !isProcessing && (
+        {isCompact && feedMessages.length === 0 && !isProcessing && !liveNotes && (
           <div className="h-full flex items-center justify-center text-center p-4 text-[11px] text-zinc-500">
             {isPcSpeaking || isTranscribingPc ? 'Escutando a pergunta…' : 'A resposta do agente aparece aqui.'}
           </div>
@@ -201,6 +219,7 @@ export function CompactTranscriptFeed({
                 <p className="text-zinc-200 font-medium leading-relaxed italic text-[12px]">
                   “{item.text}”
                 </p>
+                <NotesCard hits={notesFor(item)} />
               </div>
             );
           }
@@ -232,6 +251,7 @@ export function CompactTranscriptFeed({
                 <p className="text-zinc-200 font-medium leading-relaxed italic text-[12px] mb-2">
                   “{item.text}”
                 </p>
+                <NotesCard hits={notesFor(item)} />
 
                 <div className="flex justify-end">
                   <button
@@ -257,7 +277,9 @@ export function CompactTranscriptFeed({
           // 3. Copilot / Say This (Diga isso)
           if (item.role === 'copilot') {
             return (
-              <div key={key} className="transcript-entry transcript-entry--answer say-this">
+              <React.Fragment key={key}>
+              <NotesCard hits={notesFor(item)} />
+              <div className="transcript-entry transcript-entry--answer say-this">
                 <button
                   type="button"
                   onClick={() => handleCopy(item.text, key)}
@@ -285,6 +307,7 @@ export function CompactTranscriptFeed({
                   </div>
                 </div>
               </div>
+              </React.Fragment>
             );
           }
 
@@ -292,8 +315,9 @@ export function CompactTranscriptFeed({
           const style = AGENT_STYLES[item.provider] || AGENT_STYLES.antigravity;
           const AgentIcon = style.Icon;
           return (
+            <React.Fragment key={key}>
+            <NotesCard hits={notesFor(item)} />
             <div
-              key={key}
               className={`transcript-entry transcript-entry--assistant rounded-xl border p-3 shadow-md ${style.card}`}
             >
               <div
@@ -335,8 +359,11 @@ export function CompactTranscriptFeed({
                 <FormattedAgentResponse text={item.text} />
               </div>
             </div>
+            </React.Fragment>
           );
         })}
+
+        {liveNotes && <NotesCard hits={liveNotes} live />}
 
         {!isCompact && pcLiveTranscripts.map((item) => (
           <div key={item.utteranceId} className="rounded-xl border border-indigo-500/30 bg-indigo-500/[0.07] p-3" role="status" aria-live="polite">
@@ -345,6 +372,7 @@ export function CompactTranscriptFeed({
               <span>PC / REUNIÃO · TRANSCRIÇÃO AO VIVO</span>
             </div>
             <p className="text-zinc-100 leading-relaxed text-[12px]">{item.text}</p>
+            <NotesCard hits={utteranceNotes[item.utteranceId]} live />
           </div>
         ))}
 

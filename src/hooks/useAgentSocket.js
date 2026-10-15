@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { startSystemLoopback } from '../audio/system-loopback.js';
 
+const MAX_UTTERANCE_NOTES = 32;
+
 /**
  * Hook to manage WebSocket connection with the Backend and Antigravity / Codex Agents.
  * Tracks message turns, streaming token updates, and tool calls.
@@ -22,6 +24,8 @@ export function useAgentSocket() {
   const [isTranscribingPc, setIsTranscribingPc] = useState(false);
   const [pcAudioError, setPcAudioError] = useState(null);
   const [pcLiveTranscripts, setPcLiveTranscripts] = useState([]);
+  // Notes found for each PC utterance, from its partial transcripts onward.
+  const [utteranceNotes, setUtteranceNotes] = useState({});
   const speakingUtteranceRef = useRef(null);
   const pendingUtterancesRef = useRef(new Set());
   const [selectedProvider, setSelectedProvider] = useState('antigravity');
@@ -146,6 +150,7 @@ export function useAgentSocket() {
 
       case 'session_reset':
         setPcLiveTranscripts([]);
+        setUtteranceNotes({});
         speakingUtteranceRef.current = null;
         pendingUtterancesRef.current.clear();
         setIsPcSpeaking(false);
@@ -201,6 +206,15 @@ export function useAgentSocket() {
         setPcLiveTranscripts((prev) => {
           const next = prev.filter((item) => item.utteranceId !== event.utteranceId);
           return [...next, { utteranceId: event.utteranceId, text: event.text }];
+        });
+        break;
+
+      case 'notes_hits':
+        setUtteranceNotes((prev) => {
+          const id = event.utteranceId || 'legacy';
+          const { [id]: _previous, ...rest } = prev;
+          const kept = Object.keys(rest).slice(-(MAX_UTTERANCE_NOTES - 1));
+          return { ...Object.fromEntries(kept.map((key) => [key, rest[key]])), [id]: event.hits || [] };
         });
         break;
 
@@ -264,6 +278,7 @@ export function useAgentSocket() {
             model: event.model,
             persona: event.persona,
             prompt: event.prompt,
+            notes: event.notes ?? (existing >= 0 ? prev[existing].notes : undefined),
             timestamp: event.timestamp || Date.now(),
           };
           if (existing < 0) return [...prev, message];
@@ -368,6 +383,7 @@ export function useAgentSocket() {
             images: event.images?.length ? event.images : undefined,
             timestamp: event.timestamp || Date.now(),
             source: event.source || 'voice',
+            notes: event.notes,
             provider: event.provider,
             model: event.model,
             reasoningEffort: event.reasoningEffort,
@@ -380,6 +396,7 @@ export function useAgentSocket() {
             status: 'streaming',
             timestamp: Date.now(),
             source: event.source || 'voice',
+            notes: event.notes,
             provider: event.provider,
             model: event.model,
             reasoningEffort: event.reasoningEffort,
@@ -836,6 +853,7 @@ export function useAgentSocket() {
     isTranscribingPc,
     pcAudioError,
     pcLiveTranscripts,
+    utteranceNotes,
     clearPcAudioError: () => setPcAudioError(null),
     selectedProvider,
     selectedModel,

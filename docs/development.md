@@ -86,6 +86,7 @@ Mudanças no backend exigem reiniciar seu processo. Fechar o Electron encerra o 
 | PYTHON_BIN | Interpretador Python usado pelo transcritor; sem ela, `python3`/`python` (Linux) ou `python`/`py -3` (Windows). |
 | INTERVIEWAI_AUDIO_SOURCE | `parec` (padrão no Linux) ou `renderer` (padrão no Windows): origem do áudio do PC. |
 | PORT | Porta ao iniciar server/index.js diretamente; o launcher desktop fixa 3001. |
+| INTERVIEWAI_NOTES_CONFIG | Arquivo onde fica a pasta da vault do Obsidian; padrão `notes.json` ao lado do perfil. |
 | INTERVIEWAI_DEV_URL | URL do renderer; preenchida pelo script de desenvolvimento. |
 | LATENCY_PROVIDER, LATENCY_MODEL, LATENCY_RUNS | Configuração do script de medição de latência. |
 
@@ -124,10 +125,13 @@ O backend não carrega `.env` automaticamente. Exporte as variáveis no shell ou
 | server/agent-images.js | Validação das imagens anexadas (até 4, base64 PNG/JPEG/WebP) e formato de cada CLI: inline no Codex e no Claude Code; arquivo temporário no Antigravity. |
 | server/candidate-context.js | Leitura limitada ao contexto.md da raiz do projeto. |
 | server/conversation-memory.js | Janela de falas reais, separada de sugestões da IA, enviada a cada pedido do copiloto. |
+| server/notes-index.js | Índice BM25 em memória das notas: divisão por título, limpeza da sintaxe do Obsidian, termos sem acento e trechos com destaque. |
+| server/notes-vault.js | Conexão da vault: leitura dos `.md`, observação de alterações (`fs.watch`), persistência da pasta e envio dos resultados por fala (`notes_hits`). |
+| src/components/NotesCard.jsx e NotesVaultModal.jsx | Card dos trechos no feed e tela de configuração da vault. |
 | shared/candidate-profile.js | Perfil estruturado: normalização, limites e montagem do texto enviado ao modelo. |
 | server/profile-store.js | Persistência do perfil em `~/.local/share/interviewai/profile.json` ou `%APPDATA%\InterviewAI\profile.json` (gravação atômica). |
 
-`POST /api/profile/import?kind=cv|job` recebe o arquivo no corpo (até 10 MB, nome no cabeçalho `X-File-Name`), organiza o texto com `runIsolatedAgent` (um processo do CLI só para esse pedido, sem afetar a sessão aquecida nem a conversa) e devolve `{ fields, warning? }`; nada é gravado até o usuário salvar. `GET /api/profile` e `PUT /api/profile` leem e gravam o perfil; o backend o carrega na inicialização e é a única fonte do contexto. `INTERVIEWAI_PROFILE_PATH` troca o arquivo (os testes usam um temporário). `GET /api/candidate-context/file` lê o `contexto.md` fixo do projeto, sem aceitar um caminho do cliente; a importação só altera o perfil quando o usuário salva.
+`POST /api/profile/import?kind=cv|job` recebe o arquivo no corpo (até 10 MB, nome no cabeçalho `X-File-Name`), organiza o texto com `runIsolatedAgent` (um processo do CLI só para esse pedido, sem afetar a sessão aquecida nem a conversa) e devolve `{ fields, warning? }`; nada é gravado até o usuário salvar. `GET /api/profile` e `PUT /api/profile` leem e gravam o perfil; o backend o carrega na inicialização e é a única fonte do contexto. `INTERVIEWAI_PROFILE_PATH` troca o arquivo (os testes usam um temporário). `GET /api/notes` devolve o estado da vault; `PUT /api/notes` (`{ path }`) conecta e indexa; `POST /api/notes/reindex` refaz o índice; `DELETE /api/notes` desconecta; `GET /api/notes/search?q=` mostra o que uma pergunta encontra. `GET /api/candidate-context/file` lê o `contexto.md` fixo do projeto, sem aceitar um caminho do cliente; a importação só altera o perfil quando o usuário salva.
 
 ## Verificação
 

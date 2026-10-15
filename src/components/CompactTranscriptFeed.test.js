@@ -55,7 +55,7 @@ function createFeedHarness() {
     useLayoutEffect: effect,
     Date, setTimeout,
     navigator: { clipboard: { writeText() {} } },
-    ...Object.fromEntries(['Sparkles', 'Mic', 'Copy', 'Check', 'StopCircle', 'Clock', 'Terminal', 'Bot', 'Asterisk', 'Monitor', 'Send', 'FileText', 'RotateCw', 'Cpu', 'ArrowDown', 'FormattedAgentResponse'].map((name) => [name, name])),
+    ...Object.fromEntries(['Sparkles', 'Mic', 'Copy', 'Check', 'StopCircle', 'Clock', 'Terminal', 'Bot', 'Asterisk', 'Monitor', 'Send', 'FileText', 'RotateCw', 'Cpu', 'ArrowDown', 'FormattedAgentResponse', 'NotesCard'].map((name) => [name, name])),
   });
   vm.runInContext(code, context);
   function nodes(value) {
@@ -91,6 +91,7 @@ function createFeedHarness() {
         .props.onScroll?.({ currentTarget: feed });
     },
     liveButton: () => nodes(tree).find((node) => node.type === 'button' && node.props['aria-label'] === 'Voltar ao vivo'),
+    notesCards: () => nodes(tree).filter((node) => node.type === 'NotesCard' && node.props.hits?.length).map((node) => node.props),
   };
 }
 
@@ -148,4 +149,23 @@ test('a new session and a tab change restore live following', () => {
   app.render({ activeTab: 'session', messages });
   assert.equal(app.feed.scrollTop, 1500);
   assert.equal(app.liveButton(), undefined);
+});
+
+test('each notes card shows once: on the question, or on the only answer in compact mode', () => {
+  const hits = [{ id: 'n#1', title: 'Pagamentos', heading: 'Métricas', snippet: '120 ms', highlights: [] }];
+  const live = [{ id: 'n#2', title: 'Kafka', heading: '', snippet: '48 partições', highlights: [] }];
+  const feed = [{ id: 'pc-a', role: 'interlocutor', text: 'Qual a latência?' }, { id: 'copilot-pc-a', role: 'copilot', text: 'Ficou em 120 ms.' }];
+  const utteranceNotes = { a: hits, b: live };
+  const pcLiveTranscripts = [{ utteranceId: 'b', text: 'E o Kafka' }];
+
+  const app = createFeedHarness();
+  app.render({ messages: feed, utteranceNotes, pcLiveTranscripts });
+  assert.deepEqual(app.notesCards().map((card) => [card.hits, !!card.live]), [[hits, false], [live, true]]);
+
+  app.render({ messages: feed, utteranceNotes, pcLiveTranscripts, isCompact: true });
+  assert.deepEqual(app.notesCards().map((card) => [card.hits, !!card.live]), [[hits, false], [live, true]]);
+
+  const direct = [{ id: 'user-1', role: 'user', text: 'latência?', notes: hits }, { id: 'agent-1', role: 'agent', text: '120 ms', notes: hits }];
+  app.render({ messages: direct });
+  assert.equal(app.notesCards().length, 1);
 });

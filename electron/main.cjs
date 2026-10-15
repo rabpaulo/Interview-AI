@@ -1,4 +1,4 @@
-const { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session, shell } = require('electron');
+const { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, screen, session, shell } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -484,6 +484,15 @@ ipcMain.handle('interviewai:set-screenshot-monitor', (_event, monitor) => {
     console.warn('[Electron] Could not save the screenshot monitor:', error.message);
   }
   return screenshotMonitor;
+});
+
+// Folder picker for the Obsidian vault; resolves to null when cancelled.
+ipcMain.handle('interviewai:pick-directory', async (_event, title) => {
+  const options = { title: typeof title === 'string' ? title.slice(0, 120) : undefined, properties: ['openDirectory'] };
+  const result = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options);
+  return result.canceled ? null : result.filePaths[0] || null;
 });
 
 ipcMain.on('interviewai:set-mode', (_event, mode) => {
