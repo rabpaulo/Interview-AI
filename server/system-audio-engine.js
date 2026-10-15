@@ -2,9 +2,21 @@ import { spawn, execSync } from 'child_process';
 import EventEmitter from 'events';
 import { PcmChunker } from '../shared/streaming-transcription.js';
 
+const CHUNK_BYTES = 1600; // 50 ms of PCM16 mono at 16 kHz
+
+/**
+ * Where the PC audio comes from: 'parec' (Linux, PulseAudio/PipeWire monitor) or
+ * 'renderer' (Windows/macOS: Electron captures the system loopback and streams PCM16 over the WebSocket).
+ */
+export function defaultAudioSource(env = process.env, platform = process.platform) {
+  if (env.INTERVIEWAI_AUDIO_SOURCE === 'parec' || env.INTERVIEWAI_AUDIO_SOURCE === 'renderer') return env.INTERVIEWAI_AUDIO_SOURCE;
+  return platform === 'linux' ? 'parec' : 'renderer';
+}
+
 /**
  * SystemAudioEngine
- * Captures native system/PC audio loopback on Linux using PulseAudio/PipeWire (parec).
+ * Captures native system/PC audio loopback: parec on Linux, or PCM pushed by the
+ * desktop renderer (pushPcm) on Windows.
  * Emits:
  * - 'level': { level: number (0-100), rms: number } (emitted ~30 times/sec)
  * - 'speech_start': { utteranceId, timestamp }
@@ -14,8 +26,10 @@ import { PcmChunker } from '../shared/streaming-transcription.js';
  * - 'error': (err)
  */
 export class SystemAudioEngine extends EventEmitter {
-  constructor() {
+  constructor({ source = defaultAudioSource() } = {}) {
     super();
+    this.source = source;
+    this.rendererLeftover = Buffer.alloc(0);
     this.captureProcess = null;
     this.isCapturing = false;
     this.currentSink = null;
@@ -48,7 +62,13 @@ export class SystemAudioEngine extends EventEmitter {
   /**
    * Discovers available audio output sinks and the current default sink.
    */
-  static listAudioSinks() {
+  static listAudioSinks(source = defaultAudioSource()) {
+    if (source === 'renderer') {
+      return {
+        defaultSink: 'loopback',
+        sinks: [{ id: '0', name: 'loopback', monitorSource: 'loopback', isDefault: true, description: 'Áudio do sistema (loopback)' }],
+      };
+    }
     try {
       let defaultSink = '';
       try {
@@ -123,6 +143,8 @@ export class SystemAudioEngine extends EventEmitter {
     this.silenceMsThreshold = silenceMsThreshold;
     this.minSpeechMs = minSpeechMs;
 
+    if (this.source === 'renderer') return this.startRendererCapture();
+
     let targetMonitor = '';
     if (sink) {
       targetMonitor = sink.endsWith('.monitor') ? sink : `${sink}.monitor`;
@@ -170,10 +192,10 @@ export class SystemAudioEngine extends EventEmitter {
     this.isCapturing = true;
     this.inSpeech = false;
     this.clearSpeech();
-    this.emit('status', { isCapturing: true, sink: this.currentSink });
+    this.emit('status', { isCapturing: true, sink: this.currentSink, source: this.source });
 
     let leftover = Buffer.alloc(0);
-    const chunkSize = 1600; // 50 ms of PCM16 mono at 16 kHz
+    const chunkSize = CHUNK_BYTES;
 
     captureProcess.stdout.on('data', (data) => {
       if (this.captureProcess !== captureProcess) return;
@@ -201,7 +223,7 @@ export class SystemAudioEngine extends EventEmitter {
       this.captureProcess = null;
       this.isCapturing = false;
       this.discardSpeech();
-      this.emit('status', { isCapturing: false, sink: this.currentSink });
+      this.emit('status', { isCapturing: false, sink: this.currentSink, source: this.source });
     });
 
     captureProcess.on('error', (err) => {
@@ -212,6 +234,31 @@ export class SystemAudioEngine extends EventEmitter {
     });
 
     return true;
+  }
+
+  // The renderer owns the audio device; the engine only waits for pushPcm().
+  startRendererCapture() {
+    if (this.isCapturing) return true;
+    this.currentSink = 'loopback';
+    this.isCapturing = true;
+    this.inSpeech = false;
+    this.rendererLeftover = Buffer.alloc(0);
+    this.clearSpeech();
+    console.log('[SystemAudio] Waiting for system audio from the desktop renderer (loopback).');
+    this.emit('status', { isCapturing: true, sink: this.currentSink, source: this.source });
+    return true;
+  }
+
+  /** PCM16 mono 16 kHz from the renderer; ignored unless a renderer capture is active. */
+  pushPcm(data) {
+    if (this.source !== 'renderer' || !this.isCapturing || !data?.length) return;
+    const combined = Buffer.concat([this.rendererLeftover, Buffer.from(data)]);
+    const usable = combined.length - (combined.length % CHUNK_BYTES);
+    for (let offset = 0; offset < usable; offset += CHUNK_BYTES) {
+      this.processPcmChunk(combined.subarray(offset, offset + CHUNK_BYTES));
+    }
+    // Keep the tail, bounded so a stalled VAD can never grow the buffer.
+    this.rendererLeftover = combined.subarray(usable, usable + CHUNK_BYTES);
   }
 
   /**
@@ -401,11 +448,12 @@ export class SystemAudioEngine extends EventEmitter {
 
     this.isCapturing = false;
     this.inSpeech = false;
+    this.rendererLeftover = Buffer.alloc(0);
     this.preSpeechChunks = [];
     this.speechStartTime = null;
     this.lastVoiceDetectedTime = null;
     this.speechVoicedMs = 0;
-    this.emit('status', { isCapturing: false, sink: this.currentSink });
+    this.emit('status', { isCapturing: false, sink: this.currentSink, source: this.source });
     console.log('[SystemAudio] PC loopback capture stopped.');
   }
 
@@ -413,6 +461,7 @@ export class SystemAudioEngine extends EventEmitter {
     return {
       isCapturing: this.isCapturing,
       sink: this.currentSink,
+      source: this.source,
       vadThreshold: this.vadThreshold,
       silenceMsThreshold: this.silenceMsThreshold,
     };

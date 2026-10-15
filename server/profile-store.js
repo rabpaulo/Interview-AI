@@ -5,8 +5,11 @@ import { EMPTY_PROFILE, normalizeProfile } from '../shared/candidate-profile.js'
 
 // Kept outside Electron's userData and the browser's localStorage, so the profile
 // survives clearing app data, new sessions, rebuilds and dev/packaged origin changes.
-export function defaultProfilePath(env = process.env) {
+export function defaultProfilePath(env = process.env, platform = process.platform) {
   if (env.INTERVIEWAI_PROFILE_PATH) return env.INTERVIEWAI_PROFILE_PATH;
+  if (platform === 'win32') {
+    return path.join(env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'InterviewAI', 'profile.json');
+  }
   const dataHome = env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
   return path.join(dataHome, 'interviewai', 'profile.json');
 }

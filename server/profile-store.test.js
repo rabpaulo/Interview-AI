@@ -8,7 +8,9 @@ import { EMPTY_PROFILE, normalizeProfile } from '../shared/candidate-profile.js'
 
 test('profile path lives outside the app data and honours overrides', () => {
   assert.equal(defaultProfilePath({ INTERVIEWAI_PROFILE_PATH: '/tmp/p.json' }), '/tmp/p.json');
-  assert.equal(defaultProfilePath({ XDG_DATA_HOME: '/data' }), path.join('/data', 'interviewai', 'profile.json'));
+  assert.equal(defaultProfilePath({ XDG_DATA_HOME: '/data' }, 'linux'), path.join('/data', 'interviewai', 'profile.json'));
+  assert.equal(defaultProfilePath({ APPDATA: 'C:\\Users\\ana\\AppData\\Roaming' }, 'win32'),
+    path.join('C:\\Users\\ana\\AppData\\Roaming', 'InterviewAI', 'profile.json'));
 });
 
 test('saves atomically, reloads in a new store and survives a corrupt file', async (t) => {

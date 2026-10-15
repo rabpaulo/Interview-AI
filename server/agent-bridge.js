@@ -1,7 +1,8 @@
-import { spawn } from 'child_process';
 import readline from 'readline';
 import { runCodexAgent, prepareCodexSession, closeCodexSession } from './codex-session.js';
 import { runClaudeAgent, prepareClaudeSession, closeClaudeSession } from './claude-session.js';
+import { normalizeImages, promptWithImageFiles, writeImageFiles } from './agent-images.js';
+import { killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
 export { runCodexAgent, closeCodexSession } from './codex-session.js';
 export { runClaudeAgent, closeClaudeSession } from './claude-session.js';
 
@@ -15,7 +16,7 @@ function disposeAgySession(session) {
   clearTimeout(session.readyTimer);
   session.rejectReady?.(new Error('Sessão encerrada'));
   session.reader?.close();
-  session.child.kill('SIGTERM');
+  killProcessTree(session.child);
   if (warmAgySession === session) warmAgySession = null;
 }
 
@@ -28,14 +29,15 @@ process.on('exit', closeCodexSession);
 process.on('exit', closeClaudeSession);
 
 /** Start the CLI without submitting a model turn. */
-function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEffort = 'high', cwd = process.cwd() }, reusePrepared = false) {
-  const agyBin = process.env.AGY_BIN || '/home/paulo/.local/bin/agy';
+// An isolated session serves a single turn and never replaces the warm session.
+function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEffort = 'high', cwd = process.cwd(), isolated = false }, reusePrepared = false) {
+  const agyBin = resolveCliBin('agy');
 
   const key = JSON.stringify([agyBin, cwd, model, reasoningEffort]);
   let session = warmAgySession;
-  if (!session || session.disposed || session.active || session.key !== key
+  if (isolated || !session || session.disposed || session.active || session.key !== key
     || (conversationId ? session.conversationId !== conversationId : !(reusePrepared || session.prepared))) {
-    disposeAgySession(session);
+    if (!isolated) disposeAgySession(session);
     const args = [
       '--input-format', 'stream-json', '--output-format', 'stream-json',
       '--dangerously-skip-permissions',
@@ -44,13 +46,13 @@ function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEf
     if (reasoningEffort) args.push('--effort', reasoningEffort);
     if (conversationId) args.push('--conversation', conversationId);
     console.log(`[AGY] Starting streaming session (model=${model}, effort=${reasoningEffort})`);
-    const child = spawn(agyBin, args, {
+    const child = spawnCli(agyBin, args, {
       cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PAGER: 'cat' },
     });
     session = { child, key, conversationId, active: null, disposed: false, prepared: true };
     session.ready = new Promise((resolve, reject) => { session.resolveReady = resolve; session.rejectReady = reject; });
     session.ready.catch(() => {});
-    warmAgySession = session;
+    if (!isolated) warmAgySession = session;
     const current = session;
     const fail = (error) => {
       if (current.disposed) return;
@@ -115,14 +117,22 @@ export function prepareAgySession(options = {}) {
   catch (error) { return Promise.reject(error); }
 }
 
-export function runAgyAgent({ onMessage, onError, onClose, prompt, ...options }) {
+export function runAgyAgent({ onMessage, onError, onClose, prompt, images, ...options }) {
   let session;
-  try { session = getAgySession(options); }
+  try {
+    // The Antigravity stream accepts only text blocks, so the agent opens image files itself.
+    prompt = promptWithImageFiles(prompt, writeImageFiles(normalizeImages(images)));
+    session = getAgySession(options);
+  }
   catch (error) {
     queueMicrotask(() => onError?.(error));
     return { kill() {} };
   }
   session.prepared = false;
+  if (options.isolated) {
+    const close = onClose;
+    onClose = (code) => { disposeAgySession(session); close?.(code); };
+  }
   const turn = { onMessage, onError, onClose, done: false, startedAt: Date.now() };
   session.active = turn;
   session.child.stdin.write(JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n');
@@ -145,6 +155,39 @@ export function closeAgentSession(provider) {
   if (!provider || provider === 'antigravity') closeAgySession();
   if (!provider || provider === 'codex') closeCodexSession();
   if (!provider || provider === 'claude') closeClaudeSession();
+}
+
+/**
+ * One prompt in a throwaway CLI process: the warm session and its conversation stay
+ * untouched. Resolves with the reply text.
+ */
+export function runIsolatedAgent({ timeoutMs = 120000, ...options }) {
+  return new Promise((resolve, reject) => {
+    let text = '';
+    let finalText = '';
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        handle?.kill();
+        reject(error);
+      } else resolve((finalText || text).trim());
+    };
+    const timer = setTimeout(() => finish(new Error('O modelo demorou demais para responder.')), timeoutMs);
+    const handle = runUnifiedAgent({
+      ...options,
+      isolated: true,
+      onMessage: (data) => {
+        const delta = data.step_update?.text_delta ?? data.step_update?.content ?? data.step_update?.text;
+        if (typeof delta === 'string') text += delta;
+        if (typeof data.result?.response === 'string') finalText = data.result.response;
+      },
+      onError: (error) => finish(error),
+      onClose: () => finish(),
+    });
+  });
 }
 
 /**

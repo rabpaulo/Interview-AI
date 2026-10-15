@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { SystemAudioEngine } from './system-audio-engine.js';
+import { defaultAudioSource, SystemAudioEngine } from './system-audio-engine.js';
 
 const chunkDurationMs = 50;
 
@@ -96,4 +96,31 @@ test('does not let an old parec process mark a newer capture as stopped', async 
     process.env.PATH = originalPath;
     fs.rmSync(fakeBinDir, { recursive: true, force: true });
   }
+});
+
+test('Windows captures in the renderer and the engine segments the PCM it pushes', async () => {
+  assert.equal(defaultAudioSource({}, 'win32'), 'renderer');
+  assert.equal(defaultAudioSource({}, 'linux'), 'parec');
+  assert.equal(defaultAudioSource({ INTERVIEWAI_AUDIO_SOURCE: 'renderer' }, 'linux'), 'renderer');
+  assert.equal(SystemAudioEngine.listAudioSinks('renderer').defaultSink, 'loopback');
+
+  const engine = new SystemAudioEngine({ source: 'renderer' });
+  const statuses = [];
+  const starts = [];
+  engine.on('status', (status) => statuses.push(status));
+  engine.on('speech_start', (event) => starts.push(event));
+  engine.pushPcm(pcmChunk(4000));
+  assert.equal(starts.length, 0, 'audio before the capture starts is ignored');
+
+  assert.equal(engine.startCapture(), true);
+  assert.deepEqual(statuses.at(-1), { isCapturing: true, sink: 'loopback', source: 'renderer' });
+  assert.equal(engine.captureProcess, null, 'no parec process on Windows');
+  // Packets of any size are re-cut into 50 ms chunks.
+  const speech = Buffer.concat([pcmChunk(4000), pcmChunk(4000)]);
+  engine.pushPcm(speech.subarray(0, 1000));
+  assert.equal(starts.length, 0);
+  engine.pushPcm(speech.subarray(1000));
+  assert.equal(starts.length, 1);
+  engine.stopCapture();
+  assert.equal(engine.getStatus().isCapturing, false);
 });

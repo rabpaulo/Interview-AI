@@ -2,6 +2,7 @@ import React, { useState, useLayoutEffect, useRef } from 'react';
 import {
   Sparkles,
   Mic,
+  Camera,
   Copy,
   Check,
   StopCircle,
@@ -167,13 +168,25 @@ export function CompactTranscriptFeed({
               >
                 <div className="flex items-center justify-between mb-1.5 text-[10px]">
                   <div className="flex items-center gap-1.5 font-bold tracking-wider text-cyan-400">
-                    <Mic size={11} />
+                    {item.source === 'screenshot' ? <Camera size={11} /> : <Mic size={11} />}
                     <span>VOCÊ</span>
                   </div>
                   <span className="font-mono text-zinc-500">
                     {item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}
                   </span>
                 </div>
+                {item.images?.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    {item.images.map((src, imageIdx) => (
+                      <img
+                        key={imageIdx}
+                        src={src}
+                        alt="Captura de tela enviada"
+                        className="max-h-28 max-w-full rounded-md border border-white/10 object-contain"
+                      />
+                    ))}
+                  </div>
+                )}
                 <p className="text-zinc-200 font-medium leading-relaxed italic text-[12px]">
                   “{item.text}”
                 </p>

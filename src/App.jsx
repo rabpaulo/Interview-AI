@@ -11,6 +11,7 @@ import { useVoiceCopilot } from './hooks/useVoiceCopilot.js';
 import { useAgentSocket } from './hooks/useAgentSocket.js';
 import { useAgentSettings } from './hooks/useAgentSettings.js';
 import { useCandidateProfile } from './hooks/useCandidateProfile.js';
+import { useTextZoom } from './hooks/useTextZoom.js';
 import { AUTO_LANGUAGE } from '../shared/language.js';
 
 export default function App() {
@@ -33,6 +34,8 @@ export default function App() {
   const agentSettings = useAgentSettings();
   // Candidate profile, persisted by the backend in a file outside the app's own data.
   const candidateProfile = useCandidateProfile();
+  // Ctrl +/-/0 scale the reading feed while the window has focus.
+  useTextZoom();
 
   // Agent WebSocket connection hook with PC Loopback & Copilot
   const {
@@ -232,6 +235,31 @@ export default function App() {
     agentSettings.currentReasoning,
     agentSettings.fastMode,
     selectedPersona,
+  ]);
+
+  // Ctrl+Alt+S: the main process captures the screen and the image goes straight to the agent.
+  useEffect(() => {
+    if (!window.interviewaiDesktop?.onScreenshot) return undefined;
+    return window.interviewaiDesktop.onScreenshot(({ image, error }) => {
+      if (error || !image) {
+        setSessionToast(`Falha na captura de tela: ${error || 'imagem vazia'}`);
+        setTimeout(() => setSessionToast(null), 4000);
+        return;
+      }
+      sendMessage('', 'screenshot', {
+        provider: agentSettings.provider,
+        model: agentSettings.currentModelId,
+        reasoningEffort: agentSettings.currentReasoning,
+        fastMode: agentSettings.fastMode,
+        images: [image],
+      });
+    });
+  }, [
+    sendMessage,
+    agentSettings.provider,
+    agentSettings.currentModelId,
+    agentSettings.currentReasoning,
+    agentSettings.fastMode,
   ]);
 
   return (

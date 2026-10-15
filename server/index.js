@@ -3,18 +3,22 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { runUnifiedAgent, prepareAgentSession, closeAgentSession } from './agent-bridge.js';
+import { runUnifiedAgent, runIsolatedAgent, prepareAgentSession, closeAgentSession } from './agent-bridge.js';
+import { importDocument, ImportError, MAX_IMPORT_BYTES } from './document-import.js';
 import { systemAudioEngine, SystemAudioEngine } from './system-audio-engine.js';
 import { transcribeAudioBuffer } from './transcriber.js';
 import { wirePcTranscription } from './pc-transcription.js';
 import { createLiveCopilot } from './live-copilot.js';
 import { readCandidateContext } from './candidate-context.js';
 import { createProfileStore } from './profile-store.js';
+import { cliAvailable, resolveCliBin } from './cli-process.js';
 import { composeCandidateContext, MAX_CONTEXT_CHARS } from '../shared/candidate-profile.js';
 import { createConversationMemory } from './conversation-memory.js';
 import { buildAgentPrompt } from './agent-prompt.js';
+import { normalizeImages, imageDataUrl, SCREENSHOT_PROMPT } from './agent-images.js';
 import { AVAILABLE_MODELS, AVAILABLE_PERSONAS, generateCopilotResponse } from './gemini-copilot.js';
 import { AUTO_LANGUAGE, LANGUAGES } from '../shared/language.js';
 
@@ -26,7 +30,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 
 // Log every HTTP request
 app.use((req, res, next) => {
@@ -69,6 +73,18 @@ let autoRespond = true;
 let lastPcTranscript = '';
 let activeLanguage = AUTO_LANGUAGE;
 const conversationMemory = createConversationMemory();
+
+// A screenshot sent without text gets a default request; memory keeps only a marker for the image.
+function readUserTurn({ text, images }) {
+  const typed = typeof text === 'string' ? text.trim() : '';
+  const attached = normalizeImages(images);
+  return {
+    images: attached,
+    request: typed || (attached.length ? SCREENSHOT_PROMPT : ''),
+    display: typed || (attached.length ? 'Captura de tela' : ''),
+    memory: attached.length ? `[captura de tela anexada] ${typed}`.trim() : typed,
+  };
+}
 
 function broadcast(data) {
   const payload = JSON.stringify(data);
@@ -286,19 +302,18 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
 
 // REST endpoints
 app.get('/api/status', (req, res) => {
-  const agyBin = process.env.AGY_BIN || '/home/paulo/.local/bin/agy';
-  const codexBin = process.env.CODEX_BIN || '/usr/bin/codex';
-  const hasAgy = fs.existsSync(agyBin);
-  const hasCodex = fs.existsSync(codexBin);
-  const claudeBin = process.env.CLAUDE_BIN || '/usr/bin/claude';
+  const agyBin = resolveCliBin('agy');
+  const codexBin = resolveCliBin('codex');
+  const claudeBin = resolveCliBin('claude');
 
   res.json({
     status: 'online',
-    agyAvailable: hasAgy,
+    platform: process.platform,
+    agyAvailable: cliAvailable(agyBin),
     agyBinPath: agyBin,
-    codexAvailable: hasCodex,
+    codexAvailable: cliAvailable(codexBin),
     codexBinPath: codexBin,
-    claudeAvailable: fs.existsSync(claudeBin),
+    claudeAvailable: cliAvailable(claudeBin),
     claudeBinPath: claudeBin,
     cwd: process.cwd(),
     selectedProvider,
@@ -342,6 +357,35 @@ app.put('/api/profile', async (req, res) => {
   }
 });
 
+// Fills profile fields from a résumé (kind=cv) or job post (kind=job). Nothing is saved:
+// the editor merges the fields into its draft and the user reviews before saving.
+app.post(
+  '/api/profile/import',
+  express.raw({ type: () => true, limit: MAX_IMPORT_BYTES }),
+  async (req, res) => {
+    const kind = req.query.kind;
+    let filename = '';
+    try { filename = decodeURIComponent(String(req.get('x-file-name') || '')); } catch {}
+    try {
+      const result = await importDocument({
+        kind,
+        buffer: req.body,
+        filename,
+        // A throwaway CLI process, so the interview conversation never sees the document.
+        runAgent: (prompt) => runIsolatedAgent({
+          provider: selectedProvider, model: selectedModel, reasoningEffort: 'low', fastMode: true,
+          prompt, cwd: os.tmpdir(),
+        }),
+      });
+      console.log(`[Profile] Imported ${kind} from "${filename}" (${result.chars} chars${result.warning ? ', fallback' : ''})`);
+      res.json(result);
+    } catch (error) {
+      if (!(error instanceof ImportError)) console.error(`[Profile] Import failed: ${error.message}`);
+      res.status(error.status || 500).json({ error: error instanceof ImportError ? error.message : 'Não foi possível importar o arquivo.' });
+    }
+  }
+);
+
 app.post('/api/settings', (req, res) => {
   const { provider, model, reasoningEffort, fastMode } = req.body || {};
   syncAgentSettings({ provider, model, reasoningEffort, fastMode });
@@ -363,7 +407,7 @@ app.post('/api/settings', (req, res) => {
 
 // System Audio Capture & Devices Endpoints
 app.get('/api/audio-devices', (req, res) => {
-  res.json(SystemAudioEngine.listAudioSinks());
+  res.json(SystemAudioEngine.listAudioSinks(systemAudioEngine.source));
 });
 
 app.post('/api/audio-capture/start', (req, res) => {
@@ -422,15 +466,14 @@ app.post(
 app.post('/api/message', (req, res) => {
   liveCopilot.cancel();
   const {
-    text,
-    source,
     provider = 'antigravity',
     model,
     reasoningEffort,
     fastMode = true,
   } = req.body;
+  const turn = readUserTurn(req.body);
 
-  if (!text?.trim()) {
+  if (!turn.request) {
     return res.status(400).json({ error: 'Mensagem vazia' });
   }
 
@@ -441,14 +484,15 @@ app.post('/api/message', (req, res) => {
 
   let finalResponse = '';
   const convId = activeConversationIds[provider];
-  conversationMemory.remember('user', text);
+  conversationMemory.remember('user', turn.memory);
 
   activeAgentProcess = runUnifiedAgent({
     provider,
     model,
     reasoningEffort,
     fastMode,
-    prompt: buildAgentPrompt(text.trim(), candidateProfile),
+    prompt: buildAgentPrompt(turn.request, candidateProfile),
+    images: turn.images,
     conversationId: convId,
     cwd: process.cwd(),
     onMessage: (eventData) => {
@@ -508,11 +552,16 @@ wss.on('connection', (ws, req) => {
       pcAudioStatus: systemAudioEngine.getStatus(),
       availableModels: AVAILABLE_MODELS,
       availablePersonas: AVAILABLE_PERSONAS,
-      availableSinks: SystemAudioEngine.listAudioSinks(),
+      availableSinks: SystemAudioEngine.listAudioSinks(systemAudioEngine.source),
     })
   );
 
-  ws.on('message', (message) => {
+  ws.on('message', (message, isBinary) => {
+    // Binary frames carry PC audio (PCM16 mono 16 kHz) captured by the renderer on Windows.
+    if (isBinary) {
+      systemAudioEngine.pushPcm(message);
+      return;
+    }
     try {
       const data = JSON.parse(message.toString());
       handleClientMessage(ws, data);
@@ -617,7 +666,8 @@ function handleClientMessage(ws, data) {
 
   if (type === 'voice_message' || type === 'text_message') {
     liveCopilot.cancel();
-    const prompt = data.text?.trim();
+    const turn = readUserTurn(data);
+    const prompt = turn.request;
     if (!prompt) {
       ws.send(JSON.stringify({ type: 'error', error: 'Mensagem vazia' }));
       return;
@@ -636,11 +686,12 @@ function handleClientMessage(ws, data) {
     }
 
     // Broadcast user message to UI
-    conversationMemory.remember('user', prompt);
+    conversationMemory.remember('user', turn.memory);
     ws.send(
       JSON.stringify({
         type: 'user_message_acknowledged',
-        text: prompt,
+        text: turn.display,
+        images: turn.images.map(imageDataUrl),
         timestamp: Date.now(),
         source: data.source || 'voice',
         provider,
@@ -669,6 +720,7 @@ function handleClientMessage(ws, data) {
       reasoningEffort,
       fastMode,
       prompt: buildAgentPrompt(prompt, candidateProfile),
+      images: turn.images,
       conversationId: currentConvId,
       cwd: process.cwd(),
       onMessage: (eventData) => {

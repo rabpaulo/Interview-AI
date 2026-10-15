@@ -3,10 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { resolvePython } from './cli-process.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const scriptPath = path.resolve(__dirname, 'transcribe.py');
+let python = null;
 
 /**
  * Transcribes an audio Buffer (WAV, WEBM, etc.) into text using Python speech recognition.
@@ -26,7 +28,12 @@ export async function transcribeAudioBuffer(audioBuffer, language = 'pt-BR', { t
       return resolve({ error: writeErr.message });
     }
 
-    const child = spawn('python3', [scriptPath, tmpFile, language]);
+    python ||= resolvePython();
+    const child = spawn(python.command, [...python.args, scriptPath, tmpFile, language], {
+      windowsHide: true,
+      // Python on Windows defaults stdout to the ANSI code page, which breaks accents in the JSON.
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+    });
     let stdout = '';
     let stderr = '';
     let settled = false;

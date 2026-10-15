@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { composeCandidateContext, EMPTY_PROFILE, isProfileEmpty, normalizeProfile } from './candidate-profile.js';
+import { composeCandidateContext, EMPTY_PROFILE, isProfileEmpty, mergeImportedFields, normalizeProfile } from './candidate-profile.js';
 import { buildAgentPrompt } from '../server/agent-prompt.js';
 
 test('normalizes untrusted profiles to known fields and limits', () => {
@@ -36,4 +36,26 @@ test('composes only the filled sections, in a stable order', () => {
 test('chat prompts default code answers to the preferred language', () => {
   assert.match(buildAgentPrompt('Resolva two sum'), /em Python se nenhuma for mencionada/);
   assert.match(buildAgentPrompt('Resolva two sum', { preferredLanguage: 'TypeScript' }), /em TypeScript se nenhuma for mencionada/);
+});
+
+test('company context is part of the current interview block', () => {
+  assert.equal(composeCandidateContext({ jobCompany: 'Acme', jobCompanyContext: 'Produtos de IA e de infraestrutura.', jobRole: 'SRE' }),
+    '## Entrevista atual\nEmpresa: Acme\nSobre a empresa e seus produtos: Produtos de IA e de infraestrutura.\nVaga: SRE');
+});
+
+test('imported fields replace filled values, extend the stack and append notes', () => {
+  const draft = { name: 'Ana', role: 'Dev', stack: ['React'], notes: 'Inglês avançado.', jobCompany: 'Acme',
+    experiences: [{ title: 'Antiga', story: 'x' }] };
+  const merged = mergeImportedFields(draft, {
+    name: 'Ana Souza', role: '', stack: ['react', 'Go'], notes: 'Formação: UFMG.',
+    experiences: [{ title: 'Loja', story: 'Migrei a fila.' }], unknown: 'x',
+  });
+  assert.equal(merged.name, 'Ana Souza');
+  assert.equal(merged.role, 'Dev', 'empty imported values keep what the user typed');
+  assert.deepEqual(merged.stack, ['React', 'Go']);
+  assert.equal(merged.notes, 'Inglês avançado.\n\nFormação: UFMG.');
+  assert.deepEqual(merged.experiences, [{ title: 'Loja', story: 'Migrei a fila.' }]);
+  assert.equal(merged.jobCompany, 'Acme');
+  assert.equal(merged.unknown, undefined);
+  assert.equal(mergeImportedFields(merged, { notes: 'Formação: UFMG.' }).notes, merged.notes, 'reimporting does not duplicate notes');
 });

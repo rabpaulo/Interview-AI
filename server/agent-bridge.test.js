@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as bridge from './agent-bridge.js';
 
@@ -212,4 +213,42 @@ test('Claude Code: a prepared but unused session is recreated with its ID instea
   const result = messages.find((m) => m.event === 'result').result;
   assert.equal(result.conversation_id, prepared.conversationId);
   assert.equal(result.response, 'depois da troca');
+});
+
+const PIXEL = { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==' };
+
+for (const provider of ['codex', 'claude']) {
+  test(`${provider}: attached images reach the CLI as native image input before the text`, { timeout: 3000 }, async (t) => {
+    fixture(t);
+    const result = await new Promise((resolve, reject) => {
+      const messages = [];
+      bridge.runUnifiedAgent({ provider, prompt: 'resolva', images: [PIXEL, { mimeType: 'text/html', data: 'PGI+' }],
+        onMessage: (event) => messages.push(event), onError: reject,
+        onClose: () => resolve(messages.find((e) => e.event === 'result').result) });
+    });
+    const marker = provider === 'codex' ? '[image:data:image/png]' : '[image:image/png]';
+    assert.equal(result.response, `${marker} resolva`, 'unsupported types must be dropped');
+  });
+}
+
+test('antigravity: attached images are saved to files the prompt points to', { timeout: 3000 }, async (t) => {
+  fixture(t);
+  const { result } = await turn({ prompt: 'resolva', images: [PIXEL] });
+  const file = result.response.match(/^- (.+\.png)$/m)?.[1];
+  assert.ok(file, result.response);
+  assert.deepEqual(fs.readFileSync(file), Buffer.from(PIXEL.data, 'base64'));
+  assert.ok(result.response.endsWith('resolva'));
+  fs.rmSync(file);
+});
+
+test('isolated runs use their own process and leave the warm session untouched', { timeout: 5000 }, async (t) => {
+  fixture(t);
+  for (const provider of ['claude', 'codex', 'antigravity']) {
+    const warm = await bridge.prepareAgentSession({ provider });
+    const reply = await bridge.runIsolatedAgent({ provider, prompt: 'extraia o currículo' });
+    assert.equal(reply, 'extraia o currículo', provider);
+    const again = await bridge.prepareAgentSession({ provider });
+    assert.equal(again.pid, warm.pid, `${provider}: the warm session must survive an isolated run`);
+  }
+  await assert.rejects(bridge.runIsolatedAgent({ provider: 'claude', prompt: '__error__' }), /Falha simulada/);
 });

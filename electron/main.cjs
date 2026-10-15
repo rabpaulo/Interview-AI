@@ -1,8 +1,8 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, session, shell } = require('electron');
+const { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session, shell } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 let mainWindow = null;
 let isAlwaysOnTop = true;
@@ -15,6 +15,9 @@ const useCssOpacity = process.platform === 'linux';
 const managedByDevScript = process.argv.includes('--managed-backend');
 const devRendererUrl = process.env.INTERVIEWAI_DEV_URL || 'http://localhost:5173';
 const managedRenderer = process.argv.includes('--managed-renderer') || managedByDevScript;
+
+// Windows groups taskbar entries and notifications by this id; it must match electron-builder's appId.
+if (process.platform === 'win32') app.setAppUserModelId('com.interviewai.copilot');
 
 // Carry saved settings over from the app's previous name (one-time copy).
 const legacyUserData = path.join(app.getPath('appData'), 'perssua-code-copilot');
@@ -64,6 +67,7 @@ function ensureServerRunning() {
     serverProcess = spawn(process.execPath || 'node', [serverScript], {
       cwd: path.join(__dirname, '..'),
       stdio: 'inherit',
+      windowsHide: true,
       env: { ...process.env, PORT: '3001', ELECTRON_RUN_AS_NODE: '1' },
     });
 
@@ -109,6 +113,24 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // A file dropped outside a drop zone must never replace the app with the file.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('file:')) event.preventDefault();
+  });
+
+  // Ctrl +/-/0 zoom only the reading text. Intercepting them here also disables the
+  // default menu's whole-page zoom; the keys only arrive while the window has focus.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !(input.control || input.meta) || input.alt) return;
+    let action = null;
+    if (input.key === '=' || input.key === '+' || input.code === 'NumpadAdd') action = 'text_zoom_in';
+    else if (input.key === '-' || input.key === '_' || input.code === 'NumpadSubtract') action = 'text_zoom_out';
+    else if (input.key === '0' || input.code === 'Numpad0') action = 'text_zoom_reset';
+    if (!action) return;
+    event.preventDefault();
+    mainWindow.webContents.send('interviewai:shortcut', action);
   });
 
   // Log renderer console messages to terminal
@@ -229,26 +251,175 @@ function setupShortcuts() {
     });
   } catch (err) {}
 
-  // Global Shortcut: Alt+Shift+P -> Toggle PC audio listening
-  globalShortcut.register('Alt+Shift+P', () => {
+  // Global Shortcut: Ctrl+Alt+P -> Toggle PC audio listening
+  globalShortcut.register('Control+Alt+P', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('interviewai:shortcut', 'toggle_pc_audio');
     }
   });
 
-  // Global Shortcut: Alt+Shift+M -> Toggle mic recording
-  globalShortcut.register('Alt+Shift+M', () => {
+  // Global Shortcut: Ctrl+Alt+M -> Toggle mic recording
+  globalShortcut.register('Control+Alt+M', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('interviewai:shortcut', 'toggle_mic');
     }
   });
 
-  // Global Shortcut: Alt+Shift+N -> Nova Sessão
-  globalShortcut.register('Alt+Shift+N', () => {
+  // Global Shortcut: Ctrl+Alt+S -> Send a screenshot to the agent
+  if (!globalShortcut.register(SCREENSHOT_SHORTCUT, sendScreenshot)) {
+    console.warn(`[Electron] Could not register ${SCREENSHOT_SHORTCUT}: it is taken by another application.`);
+  }
+
+  // Global Shortcut: Ctrl+Alt+N -> Nova Sessão
+  globalShortcut.register('Control+Alt+N', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('interviewai:shortcut', 'new_session');
     }
   });
+}
+
+// Long edge of screenshots sent to the agent: keeps text legible with a small payload.
+const SCREENSHOT_MAX_EDGE = 1920;
+// Alt+Shift is a common layout switch on Linux (grp:alt_shift_toggle) and swallows Shift there,
+// so the global shortcuts use Ctrl+Alt instead.
+const SCREENSHOT_SHORTCUT = 'Control+Alt+S';
+const CURSOR_MONITOR = 'cursor';
+const screenshotSettingsFile = path.join(app.getPath('userData'), 'screenshot.json');
+let isCapturingScreen = false;
+
+// Monitor captured by the shortcut: CURSOR_MONITOR or an output name such as "DP-2".
+let screenshotMonitor = (() => {
+  try {
+    const { monitor } = JSON.parse(fs.readFileSync(screenshotSettingsFile, 'utf8'));
+    return typeof monitor === 'string' && monitor ? monitor : CURSOR_MONITOR;
+  } catch {
+    return CURSOR_MONITOR;
+  }
+})();
+
+// X11 output names (DP-2, HDMI-1) with their geometry in physical pixels.
+function readXrandrOutputs() {
+  if (process.platform !== 'linux') return Promise.resolve([]);
+  return new Promise((resolve) => {
+    execFile('xrandr', ['--listmonitors'], { timeout: 2000 }, (error, stdout) => {
+      if (error) return resolve([]);
+      resolve([...stdout.matchAll(/(\d+)\/\d+x(\d+)\/\d+([+-]\d+)([+-]\d+)\s+(\S+)\s*$/gm)].map((match) => ({
+        width: Number(match[1]), height: Number(match[2]), x: Number(match[3]), y: Number(match[4]), name: match[5],
+      })));
+    });
+  });
+}
+
+async function listMonitors() {
+  const outputs = await readXrandrOutputs();
+  const primaryId = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((display, index) => {
+    const scale = display.scaleFactor || 1;
+    const { x, y, width, height } = display.bounds;
+    const output = outputs.find((item) => Math.abs(item.x - x * scale) <= 1 && Math.abs(item.y - y * scale) <= 1
+      && Math.abs(item.width - width * scale) <= 1 && Math.abs(item.height - height * scale) <= 1);
+    return {
+      id: display.id,
+      name: output?.name || display.label || `Monitor ${index + 1}`,
+      width: Math.round(width * scale),
+      height: Math.round(height * scale),
+      primary: display.id === primaryId,
+    };
+  });
+}
+
+async function screenshotDisplay() {
+  if (screenshotMonitor !== CURSOR_MONITOR) {
+    const monitor = (await listMonitors()).find((item) => item.name === screenshotMonitor);
+    const display = monitor && screen.getAllDisplays().find((item) => item.id === monitor.id);
+    // A disconnected monitor falls back to the one under the cursor.
+    if (display) return display;
+  }
+  return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+}
+
+const intersects = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+// Keeps the overlay out of a capture of `display` without unmapping it: tiling window
+// managers such as dwm re-place a remapped window on the focused monitor.
+async function withoutOverlay(display, task) {
+  const win = mainWindow;
+  if (!win.isVisible() || win.isMinimized() || !intersects(win.getBounds(), display.bounds)) return task();
+  const useShape = process.platform !== 'darwin';
+  const opacity = win.getOpacity();
+  // An empty shape draws nothing, even without a compositor; macOS has no shapes but honors opacity.
+  if (useShape) win.setShape([]);
+  else win.setOpacity(0);
+  // Give the windows below time to repaint the area the overlay was covering.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  try {
+    return await task();
+  } finally {
+    if (!win.isDestroyed()) {
+      // An oversized rectangle restores the full window and survives later resizes.
+      if (useShape) win.setShape([{ x: 0, y: 0, width: 100000, height: 100000 }]);
+      else win.setOpacity(opacity);
+    }
+  }
+}
+
+function captureDisplay(display) {
+  return withoutOverlay(display, async () => {
+    const scale = display.scaleFactor || 1;
+    const capture = (width, height) => desktopCapturer.getSources({
+      types: ['screen'], thumbnailSize: { width: Math.round(width * scale), height: Math.round(height * scale) },
+    });
+    const displays = screen.getAllDisplays();
+    let sources = await capture(display.size.width, display.size.height);
+    // On X11 the capturer's display_id is unrelated to Electron's display ids, but both list monitors in RandR order.
+    const source = sources.find((item) => item.display_id === String(display.id))
+      || (sources.length === displays.length ? sources[displays.findIndex((item) => item.id === display.id)] : null);
+    if (source) return source.thumbnail;
+    if (sources.length === 1 && displays.length > 1) {
+      // Some X11 setups expose every monitor as one screen: crop the requested display.
+      const desktop = displays.reduce((area, { bounds }) => ({
+        width: Math.max(area.width, bounds.x + bounds.width),
+        height: Math.max(area.height, bounds.y + bounds.height),
+      }), { width: 0, height: 0 });
+      sources = await capture(desktop.width, desktop.height);
+      const shot = sources[0].thumbnail;
+      const ratio = shot.getSize().width / desktop.width;
+      return shot.crop({
+        x: Math.round(display.bounds.x * ratio),
+        y: Math.round(display.bounds.y * ratio),
+        width: Math.round(display.bounds.width * ratio),
+        height: Math.round(display.bounds.height * ratio),
+      });
+    }
+    return sources[0]?.thumbnail;
+  });
+}
+
+/** Captures the configured display, without the overlay, as base64 JPEG. */
+async function captureScreen() {
+  let image = await captureDisplay(await screenshotDisplay());
+  if (!image || image.isEmpty()) throw new Error('Nenhuma tela disponível para captura');
+
+  const size = image.getSize();
+  const resize = Math.min(1, SCREENSHOT_MAX_EDGE / Math.max(size.width, size.height));
+  if (resize < 1) {
+    image = image.resize({ width: Math.round(size.width * resize), height: Math.round(size.height * resize), quality: 'best' });
+  }
+  return { mimeType: 'image/jpeg', data: image.toJPEG(85).toString('base64') };
+}
+
+async function sendScreenshot() {
+  if (!mainWindow || mainWindow.isDestroyed() || isCapturingScreen) return;
+  isCapturingScreen = true;
+  try {
+    const image = await captureScreen();
+    mainWindow.webContents.send('interviewai:screenshot', { image });
+  } catch (error) {
+    console.error('[Electron] Screenshot failed:', error);
+    mainWindow?.webContents.send('interviewai:screenshot', { error: error.message });
+  } finally {
+    isCapturingScreen = false;
+  }
 }
 
 function setWindowMode(mode) {
@@ -293,6 +464,23 @@ ipcMain.handle('interviewai:toggle-always-on-top', () => {
 ipcMain.handle('interviewai:get-always-on-top', () => {
   if (!mainWindow) return false;
   return mainWindow.isAlwaysOnTop();
+});
+
+ipcMain.handle('interviewai:get-screenshot-settings', async () => ({
+  monitor: screenshotMonitor,
+  monitors: await listMonitors(),
+  shortcut: SCREENSHOT_SHORTCUT,
+}));
+
+ipcMain.handle('interviewai:set-screenshot-monitor', (_event, monitor) => {
+  if (typeof monitor !== 'string' || !monitor || monitor.length > 64) return screenshotMonitor;
+  screenshotMonitor = monitor;
+  try {
+    fs.writeFileSync(screenshotSettingsFile, JSON.stringify({ monitor }));
+  } catch (error) {
+    console.warn('[Electron] Could not save the screenshot monitor:', error.message);
+  }
+  return screenshotMonitor;
 });
 
 ipcMain.on('interviewai:set-mode', (_event, mode) => {
@@ -341,7 +529,12 @@ app.on('will-quit', () => {
   if (serverProcess) {
     console.log('[Electron] Terminating local backend server...');
     try {
-      serverProcess.kill();
+      // Windows has no SIGTERM for the backend to clean up with, so end its CLI children too.
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', String(serverProcess.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      } else {
+        serverProcess.kill();
+      }
     } catch {}
     serverProcess = null;
   }

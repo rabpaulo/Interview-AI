@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import readline from 'node:readline';
+import { normalizeImages } from './agent-images.js';
+import { killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
 
 let warmSession = null;
 // IDs assigned with --session-id that have not received a turn yet. Claude only
@@ -14,19 +15,22 @@ function dispose(session, error = new Error('Sessão Claude Code encerrada')) {
   if (session.active) session.active.done = true;
   session.active = null;
   session.reader?.close();
-  session.child.kill('SIGTERM');
+  killProcessTree(session.child);
   if (warmSession === session) warmSession = null;
 }
 
 export function closeClaudeSession() { dispose(warmSession); }
 
-function getSession({ conversationId, model = 'claude-sonnet-5-5', reasoningEffort = 'medium', cwd = process.cwd() }, reusePrepared = false) {
-  const bin = process.env.CLAUDE_BIN || '/usr/bin/claude';
+// An isolated session serves a single turn and never replaces the warm session.
+function getSession({ conversationId, model = 'claude-sonnet-5-5', reasoningEffort = 'medium', cwd = process.cwd(), isolated = false }, reusePrepared = false) {
+  const bin = resolveCliBin('claude');
   const key = JSON.stringify([bin, cwd, model, reasoningEffort]);
   let session = warmSession;
-  if (session && !session.disposed && !session.active && session.key === key
-    && (conversationId ? session.conversationId === conversationId : (reusePrepared || session.prepared))) return session;
-  dispose(session);
+  if (!isolated) {
+    if (session && !session.disposed && !session.active && session.key === key
+      && (conversationId ? session.conversationId === conversationId : (reusePrepared || session.prepared))) return session;
+    dispose(session);
+  }
   const id = conversationId || randomUUID();
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
     '--verbose', '--include-partial-messages', '--dangerously-skip-permissions'];
@@ -35,14 +39,14 @@ function getSession({ conversationId, model = 'claude-sonnet-5-5', reasoningEffo
   if (conversationId && !unstartedIds.has(id)) args.push('--resume', id);
   else {
     args.push('--session-id', id);
-    unstartedIds.add(id);
+    if (!isolated) unstartedIds.add(id);
   }
   console.log(`[Claude] Starting streaming session (model=${model}, effort=${reasoningEffort})`);
   // An API key in the environment overrides the CLI's subscription login, so drop it.
   const { ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ...env } = process.env;
-  const child = spawn(bin, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, PAGER: 'cat' } });
+  const child = spawnCli(bin, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, PAGER: 'cat' } });
   session = { child, key, conversationId: id, disposed: false, prepared: true, active: null };
-  warmSession = session;
+  if (!isolated) warmSession = session;
   const current = session;
   const fail = (error) => {
     if (current.disposed) return;
@@ -115,7 +119,7 @@ export function prepareClaudeSession(options = {}) {
   catch (error) { return Promise.reject(error); }
 }
 
-export function runClaudeAgent({ prompt, onMessage, onError, onClose, ...options }) {
+export function runClaudeAgent({ prompt, images, onMessage, onError, onClose, ...options }) {
   let session;
   try { session = getSession(options); }
   catch (error) {
@@ -123,12 +127,19 @@ export function runClaudeAgent({ prompt, onMessage, onError, onClose, ...options
     return { kill() {} };
   }
   session.prepared = false;
+  if (options.isolated) {
+    const close = onClose;
+    onClose = (code) => { dispose(session); close?.(code); };
+  }
   const turn = { onMessage, onError, onClose, done: false, text: '', startedAt: Date.now() };
   session.active = turn;
   session.ready.then(() => {
     if (session.disposed || session.active !== turn) return;
     onMessage?.({ event: 'session_started', conversation_id: session.conversationId });
-    session.child.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n');
+    const attached = normalizeImages(images);
+    const content = attached.length ? [...attached.map(({ mimeType, data }) => ({
+      type: 'image', source: { type: 'base64', media_type: mimeType, data } })), { type: 'text', text: prompt }] : prompt;
+    session.child.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n');
   }).catch((error) => {
     if (turn.done || session.disposed) return;
     dispose(session, error);

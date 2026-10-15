@@ -1,5 +1,6 @@
-import { spawn } from 'node:child_process';
 import readline from 'node:readline';
+import { imageDataUrl, normalizeImages } from './agent-images.js';
+import { killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
 
 let warmSession = null;
 
@@ -14,25 +15,28 @@ function dispose(session, error = new Error('Sessão Codex encerrada')) {
   }
   session.pending.clear();
   session.reader?.close();
-  session.child.kill('SIGTERM');
+  killProcessTree(session.child);
   if (warmSession === session) warmSession = null;
 }
 
 export function closeCodexSession() { dispose(warmSession); }
 
-function getSession({ conversationId, model = 'gpt-6-luna', reasoningEffort = 'medium', fastMode = true, cwd = process.cwd() }, reusePrepared = false) {
-  const bin = process.env.CODEX_BIN || '/usr/bin/codex';
+// An isolated session serves a single turn and never replaces the warm session.
+function getSession({ conversationId, model = 'gpt-6-luna', reasoningEffort = 'medium', fastMode = true, cwd = process.cwd(), isolated = false }, reusePrepared = false) {
+  const bin = resolveCliBin('codex');
   const key = JSON.stringify([bin, cwd, model, reasoningEffort, fastMode]);
   let session = warmSession;
-  if (session && !session.disposed && !session.active && session.key === key
-    && (conversationId ? session.conversationId === conversationId : (reusePrepared || session.prepared))) return session;
-  dispose(session);
-  const child = spawn(bin, ['app-server', '--listen', 'stdio://',
+  if (!isolated) {
+    if (session && !session.disposed && !session.active && session.key === key
+      && (conversationId ? session.conversationId === conversationId : (reusePrepared || session.prepared))) return session;
+    dispose(session);
+  }
+  const child = spawnCli(bin, ['app-server', '--listen', 'stdio://',
     '-c', 'forced_login_method="chatgpt"', '-c', 'model_provider="openai"'], {
     cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PAGER: 'cat' },
   });
   session = { child, key, conversationId, disposed: false, prepared: true, active: null, pending: new Map(), nextId: 0 };
-  warmSession = session;
+  if (!isolated) warmSession = session;
   const send = (message) => {
     if (session.disposed) throw new Error('Sessão Codex encerrada');
     child.stdin.write(JSON.stringify(message) + '\n');
@@ -139,7 +143,7 @@ export function prepareCodexSession(options = {}) {
   catch (error) { return Promise.reject(error); }
 }
 
-export function runCodexAgent({ prompt, onMessage, onError, onClose, ...options }) {
+export function runCodexAgent({ prompt, images, onMessage, onError, onClose, ...options }) {
   let session;
   try { session = getSession(options); }
   catch (error) {
@@ -147,13 +151,18 @@ export function runCodexAgent({ prompt, onMessage, onError, onClose, ...options 
     return { kill() {} };
   }
   session.prepared = false;
+  if (options.isolated) {
+    const close = onClose;
+    onClose = (code) => { dispose(session); close?.(code); };
+  }
   const turn = { onMessage, onError, onClose, done: false, text: '', streamed: new Set(), startedAt: Date.now() };
   session.active = turn;
   session.ready.then(async () => {
     if (session.disposed || session.active !== turn) return;
     onMessage?.({ event: 'session_started', conversation_id: session.conversationId });
     const result = await session.rpc('turn/start', { threadId: session.conversationId,
-      input: [{ type: 'text', text: prompt }], effort: options.reasoningEffort || 'medium' });
+      input: [...normalizeImages(images).map((image) => ({ type: 'image', url: imageDataUrl(image) })),
+        { type: 'text', text: prompt }], effort: options.reasoningEffort || 'medium' });
     if (session.active === turn && !turn.done) turn.id = result.turn.id;
   }).catch((error) => {
     if (turn.done || session.disposed) return;

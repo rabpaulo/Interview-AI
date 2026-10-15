@@ -1,28 +1,36 @@
 # InterviewAI
 
-Copiloto desktop para entrevistas e reuniões, com transcrição de áudio e sugestões de resposta em uma janela flutuante.
+Copiloto desktop para entrevistas e reuniões, com transcrição de áudio e sugestões de resposta em uma janela flutuante. Roda no Linux e no Windows.
 
-- Captura do áudio do PC no Linux e gravação pelo microfone.
+- Captura do áudio do PC (Linux e Windows) e gravação pelo microfone.
 - Transcrição durante a fala; respostas automáticas após sua consolidação.
+- **Importe seu currículo** (PDF, DOCX, TXT ou MD) arrastando o arquivo: a IA preenche perfil, tecnologias e experiências.
+- **Contexto da vaga e da empresa**: produtos, stack e requisitos, importados da descrição da vaga ou escritos à mão, para respostas ligadas à entrevista daquele dia.
 - Sugestões em tom profissional e conversacional, com contexto pessoal editável.
+- Ctrl+Alt+S envia uma captura da tela (por exemplo, um exercício mostrado no PC) diretamente ao agente.
 - Integração com os CLIs autenticados do Antigravity, do Codex e do Claude Code.
 
 <p align="center">
-  <img src="docs/screenshots/transcricao.png" width="400" alt="Transcrição do áudio do PC com sugestões de resposta do copiloto">
+  <img src="docs/screenshots/transcricao.png" width="400" alt="Transcrição do áudio do PC com uma sugestão de resposta que usa o currículo e o contexto da empresa">
 </p>
 
-| Meu contexto | Menu | Modelo de IA |
+| Currículo importado | Experiências | Vaga e empresa |
 | :---: | :---: | :---: |
-| <img src="docs/screenshots/meu-contexto.png" width="260" alt="Editor de contexto pessoal"> | <img src="docs/screenshots/menu.png" width="260" alt="Menu com modelo, modo, idioma e nova sessão"> | <img src="docs/screenshots/modelo.png" width="260" alt="Seleção de provedor e modelo"> |
+| <img src="docs/screenshots/meu-contexto.png" width="260" alt="Aba Perfil preenchida a partir de um currículo em PDF arrastado para o app"> | <img src="docs/screenshots/experiencias.png" width="260" alt="Experiências extraídas do currículo"> | <img src="docs/screenshots/vaga.png" width="260" alt="Aba Vaga com o contexto da empresa e dos produtos"> |
 
-<sub>Capturas com dados fictícios de demonstração.</sub>
+| Menu | Modelo de IA |
+| :---: | :---: |
+| <img src="docs/screenshots/menu.png" width="260" alt="Menu com modelo, modo, idioma, captura e nova sessão"> | <img src="docs/screenshots/modelo.png" width="260" alt="Seleção de provedor e modelo"> |
+
+<sub>Capturas com dados fictícios de demonstração. O perfil e a vaga foram preenchidos pela importação de um currículo e de uma vaga fictícios.</sub>
 
 ## Requisitos
 
-- Linux com PipeWire/PulseAudio para capturar o áudio do PC.
+- **Linux** com PipeWire/PulseAudio (`pactl` e `parec`) para capturar o áudio do PC, ou **Windows 10/11** (o áudio do sistema é capturado pelo próprio app).
 - Node.js **22.12+** e npm.
-- Python 3 com `SpeechRecognition`, além de `ffmpeg`, `pactl` e `parec` no sistema.
+- Python 3 com `SpeechRecognition`. O `ffmpeg` é necessário no Linux e opcional no Windows.
 - Pelo menos um dos CLIs (`agy`, `codex` ou `claude`) instalado e autenticado.
+- `xrandr` (opcional, Linux/X11) para escolher o monitor da captura de tela pelo nome.
 - Internet para o reconhecimento de voz e as respostas do provedor.
 
 ## Executar
@@ -31,19 +39,25 @@ Copiloto desktop para entrevistas e reuniões, com transcrição de áudio e sug
 git clone git@github.com:rabpaulo/Interview-AI.git
 cd Interview-AI
 npm ci
+npm start
 ```
 
-Informe o caminho do CLI que vai utilizar e inicie o app:
+No Windows, instale antes o Python e a biblioteca de reconhecimento (PowerShell):
+
+```powershell
+py -m pip install SpeechRecognition
+npm ci
+npm start
+```
+
+O app encontra `agy`, `codex` e `claude` no `PATH` (no Windows, também os atalhos `.cmd` do npm). Se o CLI estiver em outro lugar, informe o caminho:
 
 ```bash
-# Antigravity
-AGY_BIN="$(command -v agy)" npm start
-
-# Ou Codex
-CODEX_BIN="$(command -v codex)" npm start
-
-# Ou Claude Code
 CLAUDE_BIN="$(command -v claude)" npm start
+```
+
+```powershell
+$env:CLAUDE_BIN = (Get-Command claude).Source; npm start
 ```
 
 Selecione o provedor correspondente em **Menu → Modelo**, no ícone ☰ da barra inferior. `npm start` inicia o frontend, abre o Electron e inicia ou reaproveita o backend na porta 3001. O áudio do PC tenta iniciar automaticamente.
@@ -53,13 +67,24 @@ Para instalar as dependências de áudio e entender os modos de execução, cons
 ## Usar
 
 1. No menu (☰) da barra inferior, escolha o modelo e o modo (tipo de entrevista).
-2. Abra **Meu contexto**, no ícone de pessoa da barra inferior. Preencha perfil (incluindo a linguagem preferida), experiências e vaga, e salve. O perfil fica em `~/.local/share/interviewai/profile.json` e persiste entre execuções.
-3. Confira a captura nos medidores de áudio. No modo automático, as falas consolidadas do PC geram sugestões; use **Diga isso** em uma fala da transcrição ou Ctrl+D para solicitar uma manualmente.
-4. Para enviar uma mensagem de voz ao agente, use o microfone ou segure **Espaço** com o app em foco.
+2. Abra **Meu contexto**, no ícone de pessoa da barra inferior. Na aba **Perfil**, arraste seu currículo para **Importar currículo** (ou clique para escolher o arquivo); a IA preenche os campos e as experiências. Revise e ajuste.
+3. Na aba **Vaga**, arraste a descrição da vaga ou preencha empresa, vaga e **Sobre a empresa e os produtos** (por exemplo: “faz produtos de IA generativa e uma plataforma de GPUs”). Salve. O perfil fica em `~/.local/share/interviewai/profile.json` (Linux) ou `%APPDATA%\InterviewAI\profile.json` (Windows) e persiste entre execuções.
+4. Confira a captura nos medidores de áudio. No modo automático, as falas consolidadas do PC geram sugestões; use **Diga isso** em uma fala da transcrição ou Ctrl+D para solicitar uma manualmente.
+5. Para enviar uma mensagem de voz ao agente, use o microfone ou segure **Espaço** com o app em foco.
 
-O `contexto.md` é local e está no `.gitignore`; não acompanha o clone. Em **Extras**, importar o arquivo acrescenta o texto às notas do perfil.
+A importação usa o provedor selecionado e só altera o rascunho: nada é salvo até você clicar em **Salvar**. O `contexto.md` é local e está no `.gitignore`; não acompanha o clone. Em **Extras**, importar o arquivo acrescenta o texto às notas do perfil.
 
 O fim da fala é detectado por uma pausa de aproximadamente 900 ms. Isso pode dividir uma pergunta com pausas longas. A latência também depende da transcrição e do modelo; não há garantia de resposta instantânea.
+
+## Gerar pacote para Windows
+
+Numa máquina Windows:
+
+```powershell
+npm run build:win
+```
+
+São gerados em `release/` o instalador `InterviewAI-1.0.0-setup.exe` e o executável portátil `InterviewAI-1.0.0-portable.exe`. O Python, a biblioteca `SpeechRecognition` e o CLI do provedor precisam estar instalados na máquina. O app não é assinado; o SmartScreen pode pedir confirmação na primeira execução.
 
 ## Gerar AppImage
 
@@ -80,7 +105,7 @@ chmod +x "release/InterviewAI-1.0.0.AppImage"
 
 ## Documentação
 
-- [Uso, contexto pessoal e atalhos](docs/usage.md)
+- [Uso, contexto pessoal, importação de currículo e vaga, e atalhos](docs/usage.md)
 - [Instalação, arquitetura e testes](docs/development.md)
 - [Fluxo de áudio e diagnóstico de latência](docs/response-latency.md)
 

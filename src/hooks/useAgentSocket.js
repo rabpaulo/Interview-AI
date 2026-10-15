@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { startSystemLoopback } from '../audio/system-loopback.js';
 
 /**
  * Hook to manage WebSocket connection with the Backend and Antigravity / Codex Agents.
@@ -15,6 +16,8 @@ export function useAgentSocket() {
   // PC Loopback Audio & Copilot States
   const [pcAudioLevel, setPcAudioLevel] = useState(0);
   const [isPcCapturing, setIsPcCapturing] = useState(false);
+  // 'renderer' when this window must capture the PC audio itself (Windows) and stream it to the backend.
+  const [pcCaptureSource, setPcCaptureSource] = useState(null);
   const [isPcSpeaking, setIsPcSpeaking] = useState(false);
   const [isTranscribingPc, setIsTranscribingPc] = useState(false);
   const [pcAudioError, setPcAudioError] = useState(null);
@@ -132,6 +135,7 @@ export function useAgentSocket() {
         if (event.availableModels) setAvailableModels(event.availableModels);
         if (event.availableSinks) setAvailableSinks(event.availableSinks?.sinks || []);
         if (event.pcAudioStatus?.isCapturing !== undefined) setIsPcCapturing(event.pcAudioStatus.isCapturing);
+        if (event.pcAudioStatus?.source) setPcCaptureSource(event.pcAudioStatus.source);
         break;
 
       case 'agent_session':
@@ -169,6 +173,7 @@ export function useAgentSocket() {
 
       case 'pc_capture_status':
         setIsPcCapturing(!!event.isCapturing);
+        if (event.source) setPcCaptureSource(event.source);
         if (!event.isCapturing) {
           setIsPcSpeaking(false);
           setIsTranscribingPc(false);
@@ -360,6 +365,7 @@ export function useAgentSocket() {
             id: `user-${Date.now()}`,
             role: 'user',
             text: event.text,
+            images: event.images?.length ? event.images : undefined,
             timestamp: event.timestamp || Date.now(),
             source: event.source || 'voice',
             provider: event.provider,
@@ -558,8 +564,9 @@ export function useAgentSocket() {
   }, [connect]);
 
   const sendMessage = useCallback((text, source = 'voice', settings = {}) => {
-    const trimmed = text?.trim();
-    if (!trimmed) return;
+    const trimmed = text?.trim() || '';
+    const images = settings.images || [];
+    if (!trimmed && !images.length) return;
 
     const currentProvider = settings.provider || activeSettingsRef.current.provider || 'antigravity';
     const currentModel = settings.model || activeSettingsRef.current.model;
@@ -574,6 +581,7 @@ export function useAgentSocket() {
       model: currentModel,
       reasoningEffort: currentReasoning,
       fastMode: currentFastMode !== false,
+      ...(images.length ? { images } : {}),
     };
 
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -585,7 +593,8 @@ export function useAgentSocket() {
         {
           id: `user-${Date.now()}`,
           role: 'user',
-          text: trimmed,
+          text: trimmed || 'Captura de tela',
+          images: images.length ? images.map(({ mimeType, data }) => `data:${mimeType};base64,${data}`) : undefined,
           timestamp: Date.now(),
           source,
           provider: payload.provider,
@@ -701,6 +710,30 @@ export function useAgentSocket() {
       body: JSON.stringify(settings),
     }).catch(() => {});
   }, []);
+
+  // On Windows the backend cannot reach the audio device, so the window captures the
+  // system loopback and streams PCM over the socket while the backend reports a capture.
+  useEffect(() => {
+    if (!isConnected || !isPcCapturing || pcCaptureSource !== 'renderer') return undefined;
+    let capture = null;
+    let cancelled = false;
+    startSystemLoopback((buffer) => {
+      const ws = socketRef.current;
+      if (ws?.readyState === WebSocket.OPEN) ws.send(buffer);
+    }).then((started) => {
+      if (cancelled) started.stop();
+      else capture = started;
+    }).catch((error) => {
+      if (cancelled) return;
+      console.warn('[WS Hook] System loopback capture failed:', error);
+      setPcAudioError(`não foi possível capturar o áudio do sistema (${error.message || error.name})`);
+      socketRef.current?.send(JSON.stringify({ type: 'stop_pc_capture' }));
+    });
+    return () => {
+      cancelled = true;
+      capture?.stop();
+    };
+  }, [isConnected, isPcCapturing, pcCaptureSource]);
 
   const startPcCapture = useCallback((options = {}) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {

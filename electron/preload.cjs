@@ -19,4 +19,15 @@ contextBridge.exposeInMainWorld('interviewaiDesktop', {
     ipcRenderer.on('interviewai:shortcut', handler);
     return () => ipcRenderer.removeListener('interviewai:shortcut', handler);
   },
+
+  // Screenshot shortcut: settings hold the monitor ("cursor" or an output name) and the connected monitors.
+  getScreenshotSettings: () => ipcRenderer.invoke('interviewai:get-screenshot-settings'),
+  setScreenshotMonitor: (monitor) => ipcRenderer.invoke('interviewai:set-screenshot-monitor', monitor),
+
+  // Screen captures from the screenshot shortcut: { image } or { error }.
+  onScreenshot: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('interviewai:screenshot', handler);
+    return () => ipcRenderer.removeListener('interviewai:screenshot', handler);
+  },
 });

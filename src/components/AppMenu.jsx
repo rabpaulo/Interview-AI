@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Zap,
   Type,
+  Camera,
 } from 'lucide-react';
 
 import { getPersonaById } from '../config/personas.js';
@@ -21,6 +22,8 @@ import { AUTO_LANGUAGE, LANGUAGES } from '../../shared/language.js';
 
 const LANGUAGE_OPTIONS = [AUTO_LANGUAGE, ...LANGUAGES];
 const languageLabel = (language) => language.split('-')[0].toUpperCase();
+const CURSOR_MONITOR = 'cursor';
+const shortcutLabel = (accelerator) => accelerator.replace('Control', 'Ctrl');
 import { useWindowOpacity, MIN_OPACITY, MAX_OPACITY } from '../hooks/useWindowOpacity.js';
 
 export function AppMenu({
@@ -36,6 +39,7 @@ export function AppMenu({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(true);
+  const [screenshot, setScreenshot] = useState(null);
   const { opacity, setOpacity, solidText, setSolidText, canSolidText, isSupported: isDesktop } = useWindowOpacity();
   const menuRef = useRef(null);
 
@@ -63,6 +67,25 @@ export function AppMenu({
   useEffect(() => {
     window.interviewaiDesktop?.getAlwaysOnTop?.().then((pinned) => setIsPinned(!!pinned));
   }, []);
+
+  // Monitors are listed each time the menu opens, since they can be plugged in or out.
+  useEffect(() => {
+    if (!isOpen) return;
+    window.interviewaiDesktop?.getScreenshotSettings?.().then(setScreenshot).catch(() => setScreenshot(null));
+  }, [isOpen]);
+
+  const cycleScreenshotMonitor = async () => {
+    const options = [CURSOR_MONITOR, ...screenshot.monitors.map((monitor) => monitor.name)];
+    const next = options[(options.indexOf(screenshot.monitor) + 1) % options.length];
+    const monitor = await window.interviewaiDesktop.setScreenshotMonitor(next);
+    setScreenshot((current) => ({ ...current, monitor }));
+  };
+
+  const screenshotMonitorLabel = () => {
+    if (screenshot.monitor === CURSOR_MONITOR) return 'Auto · cursor';
+    const connected = screenshot.monitors.some((monitor) => monitor.name === screenshot.monitor);
+    return connected ? screenshot.monitor : `${screenshot.monitor} · desconectado`;
+  };
 
   const handleTogglePin = async () => {
     if (window.interviewaiDesktop?.toggleAlwaysOnTop) {
@@ -126,6 +149,21 @@ export function AppMenu({
               {language === AUTO_LANGUAGE ? `Auto${detectedLanguage ? ` · ${languageLabel(detectedLanguage)}` : ''}` : languageLabel(language)}
             </span>
           </button>
+
+          {screenshot && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={cycleScreenshotMonitor}
+              className="app-menu-item"
+              title={`Monitor capturado por ${shortcutLabel(screenshot.shortcut)} e enviado ao agente. Clique para alternar.`}
+            >
+              <Camera size={14} className="text-zinc-400 shrink-0" />
+              <span className="text-zinc-400">Captura</span>
+              <span className="ml-auto truncate text-zinc-100 font-semibold">{screenshotMonitorLabel()}</span>
+              <span className="text-[10px] text-zinc-500 shrink-0">{shortcutLabel(screenshot.shortcut)}</span>
+            </button>
+          )}
 
           <button type="button" role="menuitem" onClick={runAndClose(onNewSession)} className="app-menu-item">
             <RotateCcw size={14} className="text-zinc-400 shrink-0" />

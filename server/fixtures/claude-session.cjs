@@ -7,7 +7,11 @@ const sessionId = flag('--resume') || flag('--session-id') || `claude-test-${pro
 const emit = (message) => process.stdout.write(JSON.stringify({ ...message, session_id: sessionId }) + '\n');
 let initialized = false;
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
-  const prompt = JSON.parse(line).message.content;
+  const content = JSON.parse(line).message.content;
+  // Image blocks are echoed as markers so tests can check what reached the CLI.
+  const prompt = Array.isArray(content)
+    ? content.map((block) => (block.type === 'text' ? block.text : `[${block.type}:${block.source.media_type}]`)).join(' ')
+    : content;
   if (!initialized) {
     initialized = true;
     emit({ type: 'system', subtype: 'init', model: flag('--model') });

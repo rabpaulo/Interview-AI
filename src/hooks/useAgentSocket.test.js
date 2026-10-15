@@ -38,9 +38,10 @@ function createSocketHarness() {
     },
     useCallback(callback) { return callback; },
     useEffect(effect) { if (!mounted) effects.push(effect); },
+    startSystemLoopback: () => new Promise(() => {}),
   });
   const source = fs.readFileSync(new URL('./useAgentSocket.js', import.meta.url), 'utf8')
-    .replace(/^import .* from 'react';\n/, '')
+    .replace(/^import .*;\n/gm, '')
     .replace('export function useAgentSocket', 'function useAgentSocket');
   vm.runInContext(source, context);
   function state() {

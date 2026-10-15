@@ -1,7 +1,9 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { X, Plus, Trash2, FileText, UserRound, BookOpen, Briefcase, StickyNote, Loader2 } from 'lucide-react';
+import { DocumentDropZone } from './DocumentDropZone.jsx';
 import {
   composeCandidateContext,
+  mergeImportedFields,
   normalizeProfile,
   LANGUAGE_SUGGESTIONS,
   MAX_CONTEXT_CHARS,
@@ -17,11 +19,12 @@ const TABS = [
   { id: 'extras', label: 'Extras', Icon: StickyNote },
 ];
 
+const JOB_FIELDS = ['jobCompany', 'jobRole', 'jobCompanyContext', 'jobRequirements', 'motivation'];
 const filled = (value) => (Array.isArray(value) ? value.length > 0 : Boolean(value?.trim?.()));
 const TAB_FILLED = {
   profile: (p) => ['name', 'role', 'seniority', 'years', 'preferredLanguage', 'summary', 'stack'].some((k) => filled(p[k])),
   experiences: (p) => p.experiences.some((e) => filled(e.title) || filled(e.story)),
-  job: (p) => ['jobCompany', 'jobRole', 'jobRequirements', 'motivation'].some((k) => filled(p[k])),
+  job: (p) => JOB_FIELDS.some((k) => filled(p[k])),
   extras: (p) => filled(p.notes),
 };
 
@@ -86,11 +89,17 @@ function TagInput({ id, tags, onChange, placeholder }) {
   );
 }
 
-function ProfileTab({ draft, set, uid }) {
+function ProfileTab({ draft, set, uid, onImport }) {
   return (
     <div className="space-y-4">
+      <DocumentDropZone
+        kind="cv"
+        title="Importar currículo"
+        hint="Arraste o CV aqui ou clique para escolher (PDF, DOCX, TXT)."
+        onImported={onImport}
+      />
       <Field label="Nome" htmlFor={`${uid}-name`}>
-        <TextInput id={`${uid}-name`} value={draft.name} onChange={(v) => set('name', v)} maxLength={80} placeholder="Como você se apresenta" autoFocus />
+        <TextInput id={`${uid}-name`} value={draft.name} onChange={(v) => set('name', v)} maxLength={80} placeholder="Como você se apresenta" />
       </Field>
       <div className="grid grid-cols-[1fr_92px] gap-3">
         <Field label="Cargo atual" htmlFor={`${uid}-role`}>
@@ -189,7 +198,7 @@ function ExperiencesTab({ draft, set, uid }) {
   );
 }
 
-function JobTab({ draft, set, uid }) {
+function JobTab({ draft, set, uid, onImport }) {
   const hasJob = TAB_FILLED.job(draft);
   return (
     <div className="space-y-4">
@@ -198,21 +207,30 @@ function JobTab({ draft, set, uid }) {
         {hasJob && (
           <button
             type="button"
-            onClick={() => ['jobCompany', 'jobRole', 'jobRequirements', 'motivation'].forEach((key) => set(key, ''))}
+            onClick={() => JOB_FIELDS.forEach((key) => set(key, ''))}
             className="shrink-0 text-[11px] text-zinc-500 hover:text-zinc-200 underline-offset-2 hover:underline cursor-pointer"
           >
             Limpar vaga
           </button>
         )}
       </div>
+      <DocumentDropZone
+        kind="job"
+        title="Importar descrição da vaga"
+        hint="Arraste a vaga ou material da empresa (PDF, DOCX, TXT)."
+        onImported={onImport}
+      />
       <div className="grid grid-cols-2 gap-3">
         <Field label="Empresa" htmlFor={`${uid}-company`}>
-          <TextInput id={`${uid}-company`} value={draft.jobCompany} onChange={(v) => set('jobCompany', v)} maxLength={120} placeholder="Ex.: Nubank" autoFocus />
+          <TextInput id={`${uid}-company`} value={draft.jobCompany} onChange={(v) => set('jobCompany', v)} maxLength={120} placeholder="Ex.: Nubank" />
         </Field>
         <Field label="Vaga" htmlFor={`${uid}-job-role`}>
           <TextInput id={`${uid}-job-role`} value={draft.jobRole} onChange={(v) => set('jobRole', v)} maxLength={120} placeholder="Ex.: Backend Sênior" />
         </Field>
       </div>
+      <Field label="Sobre a empresa e os produtos" htmlFor={`${uid}-company-context`} hint="A IA conecta as respostas a esse contexto quando fizer sentido.">
+        <TextArea id={`${uid}-company-context`} value={draft.jobCompanyContext} onChange={(v) => set('jobCompanyContext', v)} rows={4} maxLength={2000} placeholder="O que a empresa faz, produtos (por exemplo, de IA ou de infraestrutura), clientes, stack, momento do time…" />
+      </Field>
       <Field label="O que a vaga pede" htmlFor={`${uid}-requirements`}>
         <TextArea id={`${uid}-requirements`} value={draft.jobRequirements} onChange={(v) => set('jobRequirements', v)} rows={5} maxLength={1500} placeholder="Cole os requisitos da descrição da vaga ou o que o recrutador contou." />
       </Field>
@@ -335,7 +353,11 @@ export function CandidateContextEditor({ profile, file, status, loadError, onRet
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const panelProps = { draft, set, uid };
+  const importFields = (fields) => {
+    setDraft((current) => mergeImportedFields(current, fields));
+    setConfirmDiscard(false);
+  };
+  const panelProps = { draft, set, uid, onImport: importFields };
 
   return (
     <div role="dialog" aria-modal="true" aria-labelledby={`${uid}-title`} className="app-context-editor fixed inset-0 z-50 flex flex-col select-text">

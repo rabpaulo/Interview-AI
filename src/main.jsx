@@ -67,6 +67,11 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// A file dropped outside a drop zone must not replace the app with the file's contents.
+for (const type of ['dragover', 'drop']) {
+  window.addEventListener(type, (event) => event.preventDefault());
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>

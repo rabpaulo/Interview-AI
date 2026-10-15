@@ -1,7 +1,7 @@
 // Structured candidate profile. The server persists it to disk and sends the
 // composed text (composeCandidateContext) to the model with every suggestion.
 
-export const MAX_CONTEXT_CHARS = 8000;
+export const MAX_CONTEXT_CHARS = 10000;
 export const MAX_EXPERIENCES = 8;
 export const MAX_STACK_ITEMS = 30;
 
@@ -18,6 +18,7 @@ const LIMITS = {
   summary: 1500,
   jobCompany: 120,
   jobRole: 120,
+  jobCompanyContext: 2000,
   jobRequirements: 1500,
   motivation: 800,
   notes: 6000,
@@ -82,6 +83,7 @@ export function composeCandidateContext(input) {
     .join('\n\n');
   const job = lines([
     ['Empresa', t('jobCompany')],
+    ['Sobre a empresa e seus produtos', t('jobCompanyContext')],
     ['Vaga', t('jobRole')],
     ['O que a vaga pede', t('jobRequirements')],
     ['Por que me interessa', t('motivation')],
@@ -93,4 +95,23 @@ export function composeCandidateContext(input) {
     block('Entrevista atual', job),
     block('Outras informações', t('notes')),
   ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * Merges fields read from a résumé or job post into a draft: filled values replace
+ * the draft's, technologies are added to the list and notes are appended.
+ */
+export function mergeImportedFields(current, fields = {}) {
+  const base = normalizeProfile(current);
+  const incoming = normalizeProfile(fields);
+  const next = { ...base };
+  for (const key of Object.keys(fields)) {
+    if (!(key in base)) continue;
+    if (key === 'stack') next.stack = normalizeProfile({ stack: [...base.stack, ...incoming.stack] }).stack;
+    else if (key === 'notes') {
+      const notes = incoming.notes.trim();
+      if (notes && !base.notes.includes(notes)) next.notes = [base.notes.trim(), notes].filter(Boolean).join('\n\n');
+    } else if (key === 'experiences' ? incoming.experiences.length : incoming[key].trim()) next[key] = incoming[key];
+  }
+  return normalizeProfile(next);
 }

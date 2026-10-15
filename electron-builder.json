@@ -29,5 +29,29 @@
     "synopsis": "InterviewAI Meeting & Voice Copilot",
     "description": "InterviewAI Meeting & Voice Copilot tailored for coding agents (Antigravity)",
     "syncDesktopName": true
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "build/icon.png"
+  },
+  "nsis": {
+    "artifactName": "${productName}-${version}-setup.${ext}",
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "shortcutName": "InterviewAI"
+  },
+  "portable": {
+    "artifactName": "${productName}-${version}-portable.${ext}"
   }
 }

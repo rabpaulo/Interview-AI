@@ -12,7 +12,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     threadId = params.threadId || `codex-test-${process.pid}`;
     emit({ id, result: { thread: { id: threadId } } });
   } else if (method === 'turn/start') {
-    const prompt = params.input[0].text;
+    // Image inputs are echoed as markers so tests can check what reached the server.
+    const prompt = params.input.map((item) => (item.type === 'text' ? item.text : `[${item.type}:${item.url.split(';')[0]}]`)).join(' ');
     if (prompt === '__rpc_error__') return emit({ id, error: { message: 'Falha RPC simulada' } });
     const turn = { id: `turn-${++turns}`, status: 'inProgress' };
     emit({ id, result: { turn } });

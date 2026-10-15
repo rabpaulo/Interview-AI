@@ -215,6 +215,11 @@ html.app-solid-text .app-context-editor {
   scrollbar-gutter: stable;
 }
 
+/* Ctrl +/- text zoom (useTextZoom): scales the feed's content, not the scroller or the rest of the UI. */
+.app-transcript-feed > * {
+  zoom: var(--text-zoom, 1);
+}
+
 .app-reading-status {
   display: flex;
   align-items: center;
@@ -369,6 +374,42 @@ html.app-solid-text .app-context-editor {
   border-radius: 12px;
   background: var(--interviewai-surface-raised);
   border: 1px solid var(--interviewai-line);
+}
+
+.app-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  background: var(--interviewai-surface-raised);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease-out, background-color 150ms ease-out;
+}
+
+.app-dropzone:hover,
+.app-dropzone--active {
+  border-color: rgba(38, 132, 255, 0.6);
+  background: rgba(38, 132, 255, 0.08);
+}
+
+.app-dropzone[aria-busy="true"] {
+  cursor: progress;
+  border-style: solid;
+}
+
+.app-dropzone__icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(38, 132, 255, 0.14);
+  color: #8fbcff;
 }
 
 .app-context-footer {
