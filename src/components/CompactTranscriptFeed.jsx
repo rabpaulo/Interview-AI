@@ -12,7 +12,6 @@ import {
   Asterisk,
   Monitor,
   Send,
-  FileText,
   RotateCw,
   Cpu,
   ArrowDown,
@@ -34,7 +33,7 @@ const NO_NOTES = {};
 
 export function CompactTranscriptFeed({
   activeTab,
-  messages: allMessages,
+  messages,
   interimTranscript,
   isListening,
   isPcCapturing,
@@ -48,17 +47,13 @@ export function CompactTranscriptFeed({
   frequencyBars,
   onAbort,
   onTriggerCopilot,
-  onSendMessage,
   agentSettings,
   isCompact = false,
 }) {
-  // Summary requests/replies live only in the Resumo tab.
-  const messages = allMessages.filter((m) => m.source !== 'summary');
   // Compact mode shows only the latest agent answer.
   const feedMessages = isCompact
     ? messages.filter((m) => m.role === 'copilot' || m.role === 'agent').slice(-1)
     : messages;
-  const summaryReply = [...allMessages].reverse().find((m) => m.source === 'summary' && m.role === 'agent');
   const [copiedId, setCopiedId] = useState(null);
   const [isFollowing, setIsFollowing] = useState(true);
   const feedRef = useRef(null);
@@ -503,121 +498,6 @@ export function CompactTranscriptFeed({
           ))
         )}
       </>
-    );
-  }
-
-  // --- TAB: RESUMO ---
-  if (activeTab === 'summary') {
-    const totalInterlocutor = messages.filter((m) => m.role === 'interlocutor').length;
-    const totalUser = messages.filter((m) => m.role === 'user').length;
-    const totalAnswers = messages.filter((m) => m.role === 'copilot' || m.role === 'agent').length;
-
-    return (
-      <div className="app-transcript-feed flex-1 overflow-y-auto px-4 py-4 space-y-3 text-xs">
-        <div className="rounded-xl border border-white/[0.06] bg-[#121218]/90 p-3 shadow-sm backdrop-blur-md">
-          <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-white/[0.06]">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-200">
-              <FileText size={13} className="text-emerald-400" />
-              <span>Resumo Executivo da Chamada</span>
-            </div>
-            <span className="text-[10px] text-zinc-500 font-mono">
-              {messages.length} interações
-            </span>
-          </div>
-
-          {/* Quick Metrics */}
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            <div className="p-2 rounded bg-white/[0.03] border border-white/[0.04] text-center">
-              <span className="block text-[10px] text-zinc-400">Interlocutor</span>
-              <span className="text-sm font-bold text-indigo-300 font-mono">{totalInterlocutor}</span>
-            </div>
-            <div className="p-2 rounded bg-white/[0.03] border border-white/[0.04] text-center">
-              <span className="block text-[10px] text-zinc-400">Você</span>
-              <span className="text-sm font-bold text-cyan-300 font-mono">{totalUser}</span>
-            </div>
-            <div className="p-2 rounded bg-white/[0.03] border border-white/[0.04] text-center">
-              <span className="block text-[10px] text-zinc-400">Respostas IA</span>
-              <span className="text-sm font-bold text-emerald-300 font-mono">{totalAnswers}</span>
-            </div>
-          </div>
-
-          {/* Key Takeaways */}
-          <div className="space-y-2 mb-3">
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
-              Destaques e Decisões
-            </span>
-            {messages.length === 0 ? (
-              <p className="text-[11px] text-zinc-500 italic">
-                Nenhum ponto registrado ainda. Inicie a conversa para gerar o resumo.
-              </p>
-            ) : (
-              <ul className="space-y-1.5 text-[11px] text-zinc-300">
-                {messages
-                  .filter((m) => m.role === 'interlocutor' || m.role === 'user')
-                  .slice(-4)
-                  .map((m, i) => (
-                    <li key={i} className="flex items-start gap-1.5">
-                      <span className="text-emerald-400 font-bold">•</span>
-                      <span className="line-clamp-2">
-                        <strong>{m.role === 'interlocutor' ? 'Tópico abordado:' : 'Instrução:'}</strong> {m.text}
-                      </span>
-                    </li>
-                  ))}
-              </ul>
-            )}
-          </div>
-
-          {summaryReply && (
-            <div className="mb-3 p-2.5 rounded-lg bg-emerald-950/20 border border-emerald-500/20">
-              <div className="flex items-center justify-between text-[10px] text-emerald-300 mb-1.5 font-semibold">
-                <span>RESUMO DA IA</span>
-                {summaryReply.text && (
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(summaryReply.text, 'summary-reply')}
-                    className="p-1 hover:bg-emerald-500/20 rounded cursor-pointer"
-                    title="Copiar resumo"
-                    aria-label="Copiar resumo"
-                  >
-                    {copiedId === 'summary-reply' ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
-                  </button>
-                )}
-              </div>
-              {summaryReply.status === 'streaming' && !summaryReply.text ? (
-                <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-emerald-400" />
-                  <span>Sintetizando resumo...</span>
-                </div>
-              ) : (
-                <div className="text-zinc-100 leading-relaxed text-[12px]">
-                  <FormattedAgentResponse text={summaryReply.text} />
-                </div>
-              )}
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() =>
-              onSendMessage?.(
-                'Gere um resumo conciso com tópicos executivos e próximos passos de tudo o que foi falado nesta sessão.',
-                'summary',
-                {
-                  provider: agentSettings?.provider,
-                  model: agentSettings?.currentModelId,
-                  reasoningEffort: agentSettings?.currentReasoning,
-                  fastMode: agentSettings?.fastMode,
-                }
-              )
-            }
-            disabled={messages.length === 0 || isProcessing}
-            className="w-full py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold border border-emerald-500/30 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-          >
-            <Sparkles size={12} />
-            <span>{summaryReply ? 'Atualizar Resumo com IA' : 'Sintetizar Resumo com IA'}</span>
-          </button>
-        </div>
-      </div>
     );
   }
 

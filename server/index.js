@@ -17,6 +17,8 @@ import { createNotesVault, createNotesLookup, publicHit } from './notes-vault.js
 import { agentWorkspace, cliAvailable, resolveCliBin } from './cli-process.js';
 import { composeCandidateContext, MAX_CONTEXT_CHARS } from '../shared/candidate-profile.js';
 import { createConversationMemory } from './conversation-memory.js';
+import { createSessionTranscript } from './session-transcript.js';
+import { buildSummaryPrompt, createSummaryService, saveSessionMarkdown, sessionMarkdown } from './session-summary.js';
 import { buildAgentPrompt } from './agent-prompt.js';
 import { normalizeImages, imageDataUrl, SCREENSHOT_PROMPT } from './agent-images.js';
 import { AVAILABLE_MODELS, AVAILABLE_PERSONAS, generateCopilotResponse } from './gemini-copilot.js';
@@ -61,6 +63,7 @@ const DEFAULT_MODELS = {
 };
 let activeAgentProcess = null;
 let copilotGeneration = 0;
+let agentTurnCounter = 0;
 
 let selectedProvider = 'antigravity';
 let selectedModel = 'gemini-3.8-flash';
@@ -75,6 +78,9 @@ let autoRespond = true;
 let lastPcTranscript = '';
 let activeLanguage = AUTO_LANGUAGE;
 const conversationMemory = createConversationMemory();
+const sessionTranscript = createSessionTranscript();
+// Summary settings come from the client. No provider means the conversation's model.
+let summarySettings = { auto: true, provider: null, model: null, saveOnReset: true };
 
 // Local Obsidian vault search. It runs on partial transcripts, so by the time an
 // utterance is final its notes are already on screen and ready for the prompt.
@@ -204,6 +210,9 @@ function resetAgentSession(provider) {
   systemAudioEngine.discardSpeech();
   lastPcTranscript = '';
   conversationMemory.clear();
+  archiveSession();
+  sessionTranscript.clear();
+  summaryService.reset();
   notesLookup.clear();
   broadcast({ type: 'session_reset', activeConversationIds, timestamp: Date.now() });
   prepareSelectedSession();
@@ -229,6 +238,66 @@ const liveCopilot = createLiveCopilot({
   onDiscarded: (id) => broadcast({ type: 'copilot_discarded', replyId: `copilot-pc-${id}` }),
 });
 
+function summaryConfig() {
+  const provider = summarySettings.provider || selectedProvider;
+  const model = summarySettings.provider
+    ? summarySettings.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.antigravity
+    : selectedModel;
+  return { auto: summarySettings.auto, provider, model, fastMode: selectedFastMode, error: blockedReason(provider, model) };
+}
+
+const summaryService = createSummaryService({
+  transcript: sessionTranscript,
+  config: summaryConfig,
+  // A throwaway CLI process: the live conversation never sees the summary request.
+  run: (options) => runIsolatedAgent({ ...options, timeoutMs: 180000, cwd: agentWorkspace() }),
+  canAutoStart: () => !activeAgentProcess,
+  onUpdate: (summary) => broadcast({ type: 'summary_update', summary }),
+});
+
+function recordTranscript(role, text, options) {
+  if (sessionTranscript.add(role, text, options)) summaryService.noteActivity();
+}
+
+function sessionsDir() {
+  return path.join(path.dirname(profileStore.file), 'sessions');
+}
+
+// "Nova sessão" keeps the finished session as Markdown, summarizing it first when
+// the summary on screen does not cover the last lines.
+function archiveSession() {
+  const entries = sessionTranscript.entries();
+  if (!summarySettings.saveOnReset || entries.filter((entry) => entry.role !== 'assistant').length < 2) return;
+  const startedAt = sessionTranscript.startedAt;
+  const current = summaryService.current();
+  const config = summaryConfig();
+  let summary;
+  if (current) summary = Promise.resolve(current);
+  else if (config.error) summary = Promise.reject(new Error(config.error));
+  else {
+    summary = runIsolatedAgent({
+      prompt: buildSummaryPrompt({ entries, startedAt, previous: summaryService.basis(), final: true }),
+      provider: config.provider, model: config.model, reasoningEffort: 'medium', fastMode: config.fastMode,
+      timeoutMs: 180000, cwd: agentWorkspace(),
+    }).then((text) => ({ text, model: config.model }));
+  }
+  summary
+    .catch((error) => {
+      console.warn(`[Summary] Final summary failed, saving the transcript only: ${error.message}`);
+      return null;
+    })
+    .then((result) => saveSessionMarkdown(sessionsDir(),
+      sessionMarkdown({ entries, startedAt, summary: result?.text, model: result?.model }), startedAt))
+    .then((file) => {
+      console.log(`[Summary] Saved finished session to ${file}`);
+      broadcast({ type: 'summary_saved', file, archived: true });
+    })
+    .catch((error) => {
+      console.error(`[Summary] Could not save the finished session: ${error.message}`);
+      broadcast({ type: 'summary_save_error', error: error.message });
+    });
+}
+
 const pcTranscription = wirePcTranscription(systemAudioEngine, {
   transcribe: transcribeAudioBuffer,
   getLanguage: () => activeLanguage,
@@ -241,6 +310,7 @@ const pcTranscription = wirePcTranscription(systemAudioEngine, {
   onFinal: (text, id) => {
     lastPcTranscript = text;
     conversationMemory.remember('interlocutor', text);
+    recordTranscript('interlocutor', text);
     notesLookup.lookup(id, text);
     liveCopilot.final(text, id);
   },
@@ -253,6 +323,8 @@ systemAudioEngine.on('status', (status) => {
 function triggerCopilotForText(transcript, overrideOptions = {}) {
   if (!transcript?.trim()) return;
   conversationMemory.remember('interlocutor', transcript);
+  // PC utterances were recorded when transcribed; this is a typed or repeated trigger.
+  if (!overrideOptions.utteranceId && transcript !== lastPcTranscript) recordTranscript('interlocutor', transcript);
 
   if (activeAgentProcess) {
     activeAgentProcess.kill();
@@ -329,6 +401,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
     onComplete: (response, resConvId) => {
       if (generation !== copilotGeneration || settled) return;
       if (resConvId) activeConversationIds[provider] = resConvId;
+      recordTranscript('assistant', response, { id: replyId });
       broadcast({
         type: 'copilot_completed',
         replyId, isPreview: isPreview(),
@@ -564,6 +637,29 @@ app.post(
   }
 );
 
+// Saves the current session (summary and full transcript) as Markdown in the app's
+// sessions folder or in the connected Obsidian vault.
+app.post('/api/summary/export', async (req, res) => {
+  const target = req.body?.target === 'vault' ? 'vault' : 'sessions';
+  const entries = sessionTranscript.entries();
+  if (!entries.length) return res.status(400).json({ error: 'Ainda não há nada para salvar nesta sessão.' });
+  const vault = notesVault.status;
+  if (target === 'vault' && !(vault.connected && vault.path)) {
+    return res.status(400).json({ error: 'Conecte uma vault do Obsidian para salvar nela.' });
+  }
+  const { text, model } = summaryService.state;
+  const dir = target === 'vault' ? path.join(vault.path, 'InterviewAI') : sessionsDir();
+  try {
+    const file = await saveSessionMarkdown(dir,
+      sessionMarkdown({ entries, startedAt: sessionTranscript.startedAt, summary: text, model }), sessionTranscript.startedAt);
+    console.log(`[Summary] Exported session to ${file}`);
+    res.json({ file });
+  } catch (error) {
+    console.error(`[Summary] Export failed: ${error.message}`);
+    res.status(500).json({ error: 'Não foi possível salvar o arquivo.' });
+  }
+});
+
 // REST Fallback for sending a prompt
 app.post('/api/message', (req, res) => {
   liveCopilot.cancel();
@@ -589,6 +685,7 @@ app.post('/api/message', (req, res) => {
   let finalResponse = '';
   const convId = activeConversationIds[provider];
   conversationMemory.remember('user', turn.memory);
+  recordTranscript('user', turn.memory);
 
   activeAgentProcess = runUnifiedAgent({
     provider,
@@ -613,6 +710,7 @@ app.post('/api/message', (req, res) => {
     },
     onClose: (code) => {
       activeAgentProcess = null;
+      recordTranscript('assistant', finalResponse);
       res.json({
         success: true,
         response: finalResponse,
@@ -658,6 +756,7 @@ wss.on('connection', (ws, req) => {
       availableModels: AVAILABLE_MODELS,
       availablePersonas: AVAILABLE_PERSONAS,
       availableSinks: SystemAudioEngine.listAudioSinks(systemAudioEngine.source),
+      summary: summaryService.state,
     })
   );
 
@@ -774,6 +873,23 @@ function handleClientMessage(ws, data) {
     return;
   }
 
+  if (type === 'summary_request') {
+    summaryService.request('manual');
+    return;
+  }
+
+  if (type === 'summary_settings') {
+    const { auto, provider, model, saveOnReset } = data.settings || {};
+    summarySettings = {
+      auto: auto !== undefined ? !!auto : summarySettings.auto,
+      provider: provider === undefined ? summarySettings.provider : DEFAULT_MODELS[provider] ? provider : null,
+      model: model === undefined ? summarySettings.model : (typeof model === 'string' && model) || null,
+      saveOnReset: saveOnReset !== undefined ? !!saveOnReset : summarySettings.saveOnReset,
+    };
+    summaryService.refresh();
+    return;
+  }
+
   if (type === 'voice_message' || type === 'text_message') {
     liveCopilot.cancel();
     const turn = readUserTurn(data);
@@ -802,10 +918,15 @@ function handleClientMessage(ws, data) {
 
     // Broadcast user message to UI
     conversationMemory.remember('user', turn.memory);
+    recordTranscript('user', turn.memory);
+    // Every event of this turn names it, so the client streams into the right message.
+    const turnId = `turn-${Date.now()}-${++agentTurnCounter}`;
+    let replyText = '';
     const notes = turn.images.length && !data.text?.trim() ? [] : notesVault.search(prompt);
     ws.send(
       JSON.stringify({
         type: 'user_message_acknowledged',
+        turnId,
         text: turn.display,
         images: turn.images.map(imageDataUrl),
         timestamp: Date.now(),
@@ -850,11 +971,14 @@ function handleClientMessage(ws, data) {
         if (eventData.result?.conversation_id) {
           activeConversationIds[provider] = eventData.result.conversation_id;
         }
+        if (eventData.step_update?.text_delta) replyText += eventData.step_update.text_delta;
+        if (typeof eventData.result?.response === 'string' && eventData.result.response) replyText = eventData.result.response;
 
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify({
               type: 'agent_stream',
+              turnId,
               data: eventData,
               provider,
               model,
@@ -871,6 +995,7 @@ function handleClientMessage(ws, data) {
           ws.send(
             JSON.stringify({
               type: 'agent_error',
+              turnId,
               error: err.message,
               provider,
               model,
@@ -881,10 +1006,12 @@ function handleClientMessage(ws, data) {
       },
       onClose: (code) => {
         activeAgentProcess = null;
+        recordTranscript('assistant', replyText, { id: turnId });
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify({
               type: 'agent_done',
+              turnId,
               code,
               provider,
               model,

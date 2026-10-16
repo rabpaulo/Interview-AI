@@ -65,6 +65,16 @@ Após cerca de 900 ms de silêncio, o app encerra o trecho. Uma pausa no meio da
 
 Áudio contínuo, como um vídeo ou música sem pausas, também é dividido: após 30 s de fala, o trecho é encerrado no primeiro momento mais baixo; se o áudio não baixar, ele é encerrado aos 45 s. Se o reconhecimento de um trecho falhar, o app descarta esse trecho e começa outro com o áudio seguinte, sem esperar uma pausa.
 
+## Resumo da sessão
+
+A aba **Resumo** mostra um resumo da conversa com visão geral, tópicos e perguntas, pontos de atenção, decisões e próximos passos. Ele usa a transcrição inteira da sessão: o que o interlocutor disse no áudio do PC, o que você falou ou digitou e, só como contexto, as sugestões da IA. O pedido roda num processo separado do CLI, então o resumo não entra no chat, não interrompe a resposta ao vivo nem aparece no histórico do modelo.
+
+Com **Atualizar automaticamente** ligado, o resumo é refeito em segundo plano depois de 4 falas novas e 15 segundos, esperando a resposta ao vivo terminar. **Atualizar agora** gera na hora e mostra o texto enquanto ele é escrito. Em sessões muito longas, a atualização parte do resumo anterior mais as falas novas.
+
+Em ⚙ escolha o **Modelo do resumo**: o mesmo da conversa ou um modelo dedicado de qualquer provedor disponível. Um modelo rápido (Flash, Haiku, Luna) basta.
+
+O botão de pasta salva o resumo e a transcrição completa em Markdown na pasta `sessions` ao lado do perfil (`~/.local/share/interviewai/sessions` no Linux). O botão de livro salva na pasta `InterviewAI` da vault do Obsidian conectada, onde o arquivo passa a ser indexado com as outras notas. Com **Salvar sessão ao iniciar uma nova** ligado, **Nova sessão** salva a sessão anterior em `sessions` antes de limpar a tela e gera o resumo final se o atual não cobrir as últimas falas.
+
 ## Modo compacto
 
 Ative pelo **Menu → Modo compacto** ou com **Alt+C** (app em foco). A janela encolhe no lugar e mostra só a última resposta do agente, com as configurações do menu, os medidores do PC e do microfone (clique no medidor do PC para ligar ou desligar a captura) e o botão para voltar ao modo normal. A abas, o feed de transcrição e a barra inferior ficam ocultos. Ao voltar, a janela recupera o tamanho anterior. A escolha é lembrada entre execuções.

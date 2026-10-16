@@ -187,3 +187,42 @@ test('new session uses HTTP while disconnected and sends saved settings when con
   assert.equal(settings.reasoningEffort, 'low');
   assert.equal(settings.fastMode, false);
 });
+
+test('an agent reply keeps streaming into its own message when the interviewer speaks meanwhile', () => {
+  const app = createSocketHarness();
+  app.emit({ type: 'user_message_acknowledged', turnId: 't1', text: 'Minha pergunta' });
+  app.emit({ type: 'agent_stream', turnId: 't1', data: { event: 'step_update', step_update: { text_delta: 'Primeira ' } } });
+  app.emit({ type: 'pc_speech_transcribed', utteranceId: 'u1', text: 'O entrevistador falou' });
+  app.emit({ type: 'agent_stream', turnId: 't1', data: { event: 'step_update', step_update: { text_delta: 'parte.' } } });
+  app.emit({ type: 'agent_done', turnId: 't1' });
+  const [user, agent, interlocutor] = app.state().messages;
+  assert.equal(user.role, 'user');
+  assert.equal(agent.text, 'Primeira parte.');
+  assert.equal(agent.status, 'done');
+  assert.equal(interlocutor.text, 'O entrevistador falou');
+  assert.equal(interlocutor.status, undefined);
+});
+
+test('an abort without a turn id stops the reply still streaming', () => {
+  const app = createSocketHarness();
+  app.emit({ type: 'user_message_acknowledged', turnId: 't1', text: 'Pergunta' });
+  app.emit({ type: 'pc_speech_transcribed', utteranceId: 'u1', text: 'Outra fala' });
+  app.emit({ type: 'agent_aborted' });
+  assert.equal(app.state().messages[1].status, 'aborted');
+});
+
+test('summary state, settings and saved files come from the backend', () => {
+  const app = createSocketHarness();
+  const settings = { auto: false, provider: 'claude', model: 'claude-haiku-5-5', saveOnReset: true };
+  app.state().syncSummarySettings(settings);
+  app.open();
+  assert.deepEqual(app.sent.find((message) => message.type === 'summary_settings'), { type: 'summary_settings', settings },
+    'settings are resent on every connection');
+  app.state().requestSummary();
+  assert.equal(app.sent.at(-1).type, 'summary_request');
+  app.emit({ type: 'summary_update', summary: { status: 'idle', text: '## Visão geral', covered: 2, total: 2 } });
+  assert.equal(app.state().summary.text, '## Visão geral');
+  app.emit({ type: 'summary_saved', file: '/tmp/sessao.md', archived: true });
+  assert.deepEqual({ ...app.state().summaryNotice }, { file: '/tmp/sessao.md', archived: true });
+  assert.equal(app.state().messages.length, 0, 'the summary never enters the chat');
+});

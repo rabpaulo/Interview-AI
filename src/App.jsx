@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, X, RefreshCw } from 'lucide-react';
 import { CompactTabs } from './components/CompactTabs.jsx';
 import { CompactTranscriptFeed } from './components/CompactTranscriptFeed.jsx';
+import { SummaryPanel } from './components/SummaryPanel.jsx';
 import { CompactAudioMeters } from './components/CompactAudioMeters.jsx';
 import { CompactBottomBar } from './components/CompactBottomBar.jsx';
 import { CompactModeBar } from './components/CompactModeBar.jsx';
@@ -12,6 +13,7 @@ import { NotesVaultModal } from './components/NotesVaultModal.jsx';
 import { useVoiceCopilot } from './hooks/useVoiceCopilot.js';
 import { useAgentSocket } from './hooks/useAgentSocket.js';
 import { useAgentSettings } from './hooks/useAgentSettings.js';
+import { useSummarySettings } from './hooks/useSummarySettings.js';
 import { useCandidateProfile } from './hooks/useCandidateProfile.js';
 import { useNotesVault } from './hooks/useNotesVault.js';
 import { useTextZoom } from './hooks/useTextZoom.js';
@@ -46,6 +48,7 @@ export default function App() {
 
   // Agent Settings (Provider: Antigravity / Codex, Model, Reasoning Effort, Fast Mode)
   const agentSettings = useAgentSettings();
+  const summarySettings = useSummarySettings();
   // Candidate profile, persisted by the backend in a file outside the app's own data.
   const candidateProfile = useCandidateProfile();
   const notesVault = useNotesVault();
@@ -58,6 +61,12 @@ export default function App() {
     isProcessing,
     conversationIds,
     messages,
+    summary,
+    summaryNotice,
+    clearSummaryNotice,
+    requestSummary,
+    syncSummarySettings,
+    exportSummary,
     currentToolCall,
     sendMessage,
     abortAgent,
@@ -116,6 +125,15 @@ export default function App() {
     agentSettings.currentReasoning,
     agentSettings.fastMode,
   ]);
+
+  useEffect(() => {
+    syncSummarySettings(summarySettings.settings);
+  }, [syncSummarySettings, summarySettings.settings]);
+
+  // The previous session's file is saved after the reset, so say where it went.
+  useEffect(() => {
+    if (summaryNotice?.archived) setSessionToast(`Sessão anterior salva em ${summaryNotice.file}`);
+  }, [summaryNotice]);
 
   useEffect(() => {
     syncLanguage(language);
@@ -429,26 +447,40 @@ export default function App() {
         )}
 
         {/* Core Feed ("Mostra só o que deve mostrar") */}
-        <CompactTranscriptFeed
-          activeTab={isCompact ? 'transcription' : activeTab}
-          isCompact={isCompact}
-          messages={messages}
-          interimTranscript={interimTranscript}
-          isListening={isListening}
-          isPcCapturing={isPcCapturing}
-          isPcSpeaking={isPcSpeaking}
-          isTranscribingPc={isTranscribingPc}
-          pcLiveTranscripts={pcLiveTranscripts}
-          utteranceNotes={utteranceNotes}
-          autoRespond={autoRespond}
-          isProcessing={isProcessing}
-          currentToolCall={currentToolCall}
-          frequencyBars={frequencyBars}
-          onAbort={abortAgent}
-          onTriggerCopilot={triggerCopilot}
-          onSendMessage={sendMessage}
-          agentSettings={agentSettings}
-        />
+        {!isCompact && activeTab === 'summary' ? (
+          <SummaryPanel
+            messages={messages}
+            summary={summary}
+            settings={summarySettings.settings}
+            onChangeSettings={summarySettings.update}
+            onRequest={requestSummary}
+            onExport={exportSummary}
+            notice={summaryNotice}
+            onClearNotice={clearSummaryNotice}
+            vaultConnected={!!notesVault.status?.connected}
+            availability={providerAvailability}
+          />
+        ) : (
+          <CompactTranscriptFeed
+            activeTab={isCompact ? 'transcription' : activeTab}
+            isCompact={isCompact}
+            messages={messages}
+            interimTranscript={interimTranscript}
+            isListening={isListening}
+            isPcCapturing={isPcCapturing}
+            isPcSpeaking={isPcSpeaking}
+            isTranscribingPc={isTranscribingPc}
+            pcLiveTranscripts={pcLiveTranscripts}
+            utteranceNotes={utteranceNotes}
+            autoRespond={autoRespond}
+            isProcessing={isProcessing}
+            currentToolCall={currentToolCall}
+            frequencyBars={frequencyBars}
+            onAbort={abortAgent}
+            onTriggerCopilot={triggerCopilot}
+            agentSettings={agentSettings}
+          />
+        )}
 
         {isCompact ? (
           <CompactModeBar

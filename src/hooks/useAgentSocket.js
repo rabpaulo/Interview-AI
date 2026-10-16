@@ -3,6 +3,17 @@ import { startSystemLoopback } from '../audio/system-loopback.js';
 
 const MAX_UTTERANCE_NOTES = 32;
 
+// The agent message of a turn, found by its id; without one, the newest still streaming.
+// PC transcripts can land after the reply started, so "the last message" is not it.
+function updateAgentMessage(messages, turnId, update) {
+  let index = turnId ? messages.findIndex((item) => item.id === `agent-${turnId}`) : -1;
+  if (index < 0) index = messages.findLastIndex((item) => item.role === 'agent' && item.status === 'streaming');
+  if (index < 0) return messages;
+  const next = [...messages];
+  next[index] = { ...next[index], ...update(next[index]) };
+  return next;
+}
+
 /**
  * Hook to manage WebSocket connection with the Backend and Antigravity / Codex Agents.
  * Tracks message turns, streaming token updates, and tool calls.
@@ -12,6 +23,11 @@ export function useAgentSocket() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [conversationIds, setConversationIds] = useState({ antigravity: null, codex: null, claude: null });
   const [messages, setMessages] = useState([]);
+  // Summary of the session, kept up to date by the backend.
+  const [summary, setSummary] = useState(null);
+  // Where the last export or finished session was saved, or why it failed.
+  const [summaryNotice, setSummaryNotice] = useState(null);
+  const summarySettingsRef = useRef(null);
   const [currentThought, setCurrentThought] = useState('');
   const [currentToolCall, setCurrentToolCall] = useState(null);
 
@@ -83,6 +99,7 @@ export function useAgentSocket() {
       setIsConnected(true);
       ws.send(JSON.stringify({ type: 'sync_settings', ...activeSettingsRef.current }));
       if (languageRef.current) ws.send(JSON.stringify({ type: 'set_language', language: languageRef.current }));
+      if (summarySettingsRef.current) ws.send(JSON.stringify({ type: 'summary_settings', settings: summarySettingsRef.current }));
       try {
         const savedPersona = localStorage.getItem('perssua_persona_v1');
         if (savedPersona) {
@@ -136,6 +153,7 @@ export function useAgentSocket() {
           setConversationIds((prev) => ({ ...prev, antigravity: event.conversationId }));
         }
         if (event.isProcessing !== undefined) setIsProcessing(event.isProcessing);
+        if (event.summary) setSummary(event.summary);
         if (event.selectedProvider) setSelectedProvider(event.selectedProvider);
         if (event.selectedModel) setSelectedModel(event.selectedModel);
         if (event.selectedPersona) setSelectedPersona(event.selectedPersona);
@@ -387,11 +405,23 @@ export function useAgentSocket() {
         setAutoRespond(!!event.autoRespond);
         break;
 
+      case 'summary_update':
+        setSummary(event.summary || null);
+        break;
+
+      case 'summary_saved':
+        setSummaryNotice({ file: event.file, archived: !!event.archived });
+        break;
+
+      case 'summary_save_error':
+        setSummaryNotice({ error: event.error });
+        break;
+
       case 'user_message_acknowledged':
         setMessages((prev) => [
           ...prev,
           {
-            id: `user-${Date.now()}`,
+            id: `user-${event.turnId || Date.now()}`,
             role: 'user',
             text: event.text,
             images: event.images?.length ? event.images : undefined,
@@ -404,7 +434,7 @@ export function useAgentSocket() {
             fastMode: event.fastMode,
           },
           {
-            id: `agent-${Date.now()}`,
+            id: `agent-${event.turnId || Date.now()}`,
             role: 'agent',
             text: '',
             status: 'streaming',
@@ -442,22 +472,13 @@ export function useAgentSocket() {
           }
 
           if (step.text_delta) {
-            setMessages((prev) => {
-              if (prev.length === 0) return prev;
-              const next = [...prev];
-              const lastIdx = next.length - 1;
-              if (next[lastIdx].role === 'agent') {
-                next[lastIdx] = {
-                  ...next[lastIdx],
-                  text: (next[lastIdx].text || '') + step.text_delta,
-                  provider: event.provider || next[lastIdx].provider,
-                  model: event.model || next[lastIdx].model,
-                  reasoningEffort: event.reasoningEffort || next[lastIdx].reasoningEffort,
-                  fastMode: event.fastMode !== undefined ? event.fastMode : next[lastIdx].fastMode,
-                };
-              }
-              return next;
-            });
+            setMessages((prev) => updateAgentMessage(prev, event.turnId, (message) => ({
+              text: (message.text || '') + step.text_delta,
+              provider: event.provider || message.provider,
+              model: event.model || message.model,
+              reasoningEffort: event.reasoningEffort || message.reasoningEffort,
+              fastMode: event.fastMode !== undefined ? event.fastMode : message.fastMode,
+            })));
           }
 
           // Tool activity or reasoning
@@ -482,25 +503,16 @@ export function useAgentSocket() {
             }));
           }
 
-          setMessages((prev) => {
-            if (prev.length === 0) return prev;
-            const next = [...prev];
-            const lastIdx = next.length - 1;
-            if (next[lastIdx].role === 'agent') {
-              next[lastIdx] = {
-                ...next[lastIdx],
-                text: result.response || next[lastIdx].text,
-                status: 'done',
-                duration: result.duration_seconds,
-                usage: result.usage,
-                provider: event.provider || next[lastIdx].provider,
-                model: event.model || next[lastIdx].model,
-                reasoningEffort: event.reasoningEffort || next[lastIdx].reasoningEffort,
-                fastMode: event.fastMode !== undefined ? event.fastMode : next[lastIdx].fastMode,
-              };
-            }
-            return next;
-          });
+          setMessages((prev) => updateAgentMessage(prev, event.turnId, (message) => ({
+            text: result.response || message.text,
+            status: 'done',
+            duration: result.duration_seconds,
+            usage: result.usage,
+            provider: event.provider || message.provider,
+            model: event.model || message.model,
+            reasoningEffort: event.reasoningEffort || message.reasoningEffort,
+            fastMode: event.fastMode !== undefined ? event.fastMode : message.fastMode,
+          })));
         }
         break;
       }
@@ -514,59 +526,32 @@ export function useAgentSocket() {
             [event.provider]: event.conversationId,
           }));
         }
-        setMessages((prev) => {
-          if (prev.length === 0) return prev;
-          const next = [...prev];
-          const lastIdx = next.length - 1;
-          if (next[lastIdx].role === 'agent') {
-            next[lastIdx] = {
-              ...next[lastIdx],
-              status: 'done',
-              provider: event.provider || next[lastIdx].provider,
-              model: event.model || next[lastIdx].model,
-            };
-          }
-          return next;
-        });
+        setMessages((prev) => updateAgentMessage(prev, event.turnId, (message) => ({
+          status: 'done',
+          provider: event.provider || message.provider,
+          model: event.model || message.model,
+        })));
         break;
 
       case 'agent_error':
         setIsProcessing(false);
         setCurrentToolCall(null);
-        setMessages((prev) => {
-          if (prev.length === 0) return prev;
-          const next = [...prev];
-          const lastIdx = next.length - 1;
-          if (next[lastIdx].role === 'agent') {
-            next[lastIdx] = {
-              ...next[lastIdx],
-              status: 'error',
-              error: event.error,
-              text: next[lastIdx].text
-                ? next[lastIdx].text + `\n\n*(Erro: ${event.error})*`
-                : `Erro na execução: ${event.error}`,
-            };
-          }
-          return next;
-        });
+        setMessages((prev) => updateAgentMessage(prev, event.turnId, (message) => ({
+          status: 'error',
+          error: event.error,
+          text: message.text
+            ? message.text + `\n\n*(Erro: ${event.error})*`
+            : `Erro na execução: ${event.error}`,
+        })));
         break;
 
       case 'agent_aborted':
         setIsProcessing(false);
         setCurrentToolCall(null);
-        setMessages((prev) => {
-          if (prev.length === 0) return prev;
-          const next = [...prev];
-          const lastIdx = next.length - 1;
-          if (next[lastIdx].role === 'agent') {
-            next[lastIdx] = {
-              ...next[lastIdx],
-              status: 'aborted',
-              text: (next[lastIdx].text || '') + '\n\n*(Interrompido pelo usuário)*',
-            };
-          }
-          return next;
-        });
+        setMessages((prev) => updateAgentMessage(prev, event.turnId, (message) => ({
+          status: 'aborted',
+          text: (message.text || '') + '\n\n*(Interrompido pelo usuário)*',
+        })));
         break;
 
       default:
@@ -657,36 +642,20 @@ export function useAgentSocket() {
         .then((res) => res.json())
         .then((data) => {
           setIsProcessing(false);
-          setMessages((prev) => {
-            const next = [...prev];
-            const lastIdx = next.length - 1;
-            if (next[lastIdx]?.role === 'agent') {
-              next[lastIdx] = {
-                ...next[lastIdx],
-                text: data.response || 'Comando executado.',
-                status: 'done',
-                provider: data.provider || payload.provider,
-                model: data.model || payload.model,
-              };
-            }
-            return next;
-          });
+          setMessages((prev) => updateAgentMessage(prev, null, () => ({
+            text: data.response || 'Comando executado.',
+            status: 'done',
+            provider: data.provider || payload.provider,
+            model: data.model || payload.model,
+          })));
         })
         .catch((err) => {
           console.error('[HTTP Fallback Error]:', err);
           setIsProcessing(false);
-          setMessages((prev) => {
-            const next = [...prev];
-            const lastIdx = next.length - 1;
-            if (next[lastIdx]?.role === 'agent') {
-              next[lastIdx] = {
-                ...next[lastIdx],
-                text: `Erro ao comunicar com o servidor: ${err.message}`,
-                status: 'error',
-              };
-            }
-            return next;
-          });
+          setMessages((prev) => updateAgentMessage(prev, null, () => ({
+            text: `Erro ao comunicar com o servidor: ${err.message}`,
+            status: 'error',
+          })));
         });
     }
   }, []);
@@ -853,11 +822,46 @@ export function useAgentSocket() {
     }
   }, []);
 
+  const requestSummary = useCallback(() => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'summary_request' }));
+    }
+  }, []);
+
+  const syncSummarySettings = useCallback((settings) => {
+    summarySettingsRef.current = settings;
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'summary_settings', settings }));
+    }
+  }, []);
+
+  // target: 'sessions' (the app's folder) or 'vault' (the connected Obsidian vault).
+  const exportSummary = useCallback(async (target) => {
+    try {
+      const response = await fetch('/api/summary/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Não foi possível salvar o resumo.');
+      setSummaryNotice({ file: result.file });
+    } catch (error) {
+      setSummaryNotice({ error: error.message });
+    }
+  }, []);
+
   return {
     isConnected,
     isProcessing,
     conversationIds,
     messages,
+    summary,
+    summaryNotice,
+    clearSummaryNotice: () => setSummaryNotice(null),
+    requestSummary,
+    syncSummarySettings,
+    exportSummary,
     currentThought,
     currentToolCall,
     sendMessage,

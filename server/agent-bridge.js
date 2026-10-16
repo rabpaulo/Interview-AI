@@ -173,29 +173,39 @@ export function closeAgentSession(provider) {
 
 /**
  * One prompt in a throwaway CLI process: the warm session and its conversation stay
- * untouched. Resolves with the reply text.
+ * untouched. Resolves with the reply text. `onText` receives the reply so far while it
+ * streams; aborting `signal` kills the process and rejects with an AbortError.
  */
-export function runIsolatedAgent({ timeoutMs = 120000, ...options }) {
+export function runIsolatedAgent({ timeoutMs = 120000, onText, signal, ...options }) {
   return new Promise((resolve, reject) => {
     let text = '';
     let finalText = '';
     let settled = false;
+    let handle = null;
+    const abort = () => finish(Object.assign(new Error('Cancelado'), { name: 'AbortError' }));
     const finish = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
       if (error) {
         handle?.kill();
         reject(error);
       } else resolve((finalText || text).trim());
     };
     const timer = setTimeout(() => finish(new Error('O modelo demorou demais para responder.')), timeoutMs);
-    const handle = runUnifiedAgent({
+    if (signal?.aborted) return abort();
+    signal?.addEventListener('abort', abort);
+    handle = runUnifiedAgent({
       ...options,
       isolated: true,
       onMessage: (data) => {
+        if (settled) return;
         const delta = data.step_update?.text_delta ?? data.step_update?.content ?? data.step_update?.text;
-        if (typeof delta === 'string') text += delta;
+        if (typeof delta === 'string' && delta) {
+          text += delta;
+          onText?.(text);
+        }
         if (typeof data.result?.response === 'string') finalText = data.result.response;
       },
       onError: (error) => finish(error),
