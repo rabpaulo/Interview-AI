@@ -114,8 +114,9 @@ const providerAvailability = createProviderAvailability({
   onChange: (availability, provider) => {
     broadcast({ type: 'provider_availability', availability });
     if (provider !== selectedProvider || activeAgentProcess) return;
+    // Also retries a failed start once the recheck it triggered finds the provider usable.
     const blocked = blockedReason(selectedProvider, selectedModel);
-    if (blocked || agentSession.status === 'unavailable') {
+    if (blocked || agentSession.status === 'unavailable' || agentSession.status === 'error') {
       preparationKey = null;
       prepareSelectedSession();
     }

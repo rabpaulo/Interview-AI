@@ -1,6 +1,7 @@
-// Availability per provider: { status: 'checking' | 'available' | 'unavailable', reason?, models? }.
+// Availability per provider: { status: 'checking' | 'available' | 'unknown' | 'unavailable', reason?, models? }.
 // `models` lists the ids the account offers; null means the CLI cannot list them,
-// so every model of an available provider is allowed.
+// so every model of an available provider is allowed. "unknown" (the check itself
+// failed) stays usable: only a definite answer blocks a provider.
 
 const EFFORT_SUFFIX = /-(low|medium|high|xhigh|max)$/;
 
@@ -14,7 +15,7 @@ export function modelListed(entry, modelId) {
 /** Why a provider (or one of its models) cannot be used; null while unknown or usable. */
 export function unavailableReason(availability, provider, modelId, modelName = modelId) {
   const entry = availability?.[provider];
-  if (!entry || entry.status === 'checking') return null;
+  if (!entry || entry.status === 'checking' || entry.status === 'unknown') return null;
   if (entry.status === 'unavailable') return entry.reason || 'Provedor indisponível.';
   if (modelId && !modelListed(entry, modelId)) return `O modelo ${modelName} não está disponível na sua conta.`;
   return null;

@@ -2,7 +2,9 @@ import readline from 'node:readline';
 import { agentWorkspace, cliAvailable, killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
 
 // Each check asks the CLI about the login and the account's models without sending
-// a prompt, so it uses no model quota.
+// a prompt, so it uses no model quota. Only a definite answer (not installed, logged
+// out, model not listed) blocks a provider; a timeout or unexpected output leaves it
+// usable as "unknown", so a network hiccup never stops the CLI from being prepared.
 const CHECK_TIMEOUT_MS = 20000;
 // Failed turns ask for a recheck; this keeps a burst of errors from spawning one each.
 const RECHECK_INTERVAL_MS = 15000;
@@ -11,6 +13,8 @@ const NAMES = { antigravity: 'Antigravity', codex: 'Codex', claude: 'Claude Code
 const BINS = { antigravity: 'agy', codex: 'codex', claude: 'claude' };
 
 const unavailable = (reason) => ({ status: 'unavailable', reason });
+const unknown = (reason) => ({ status: 'unknown', reason });
+const LOGIN_HINT = /log ?in|sign ?in|auth|credential|unauthori[sz]ed/i;
 const firstLine = (text) => text.split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, 200) || '';
 
 function run(bin, args, env = process.env) {
@@ -37,12 +41,15 @@ function run(bin, args, env = process.env) {
 
 async function checkAntigravity(bin) {
   const { code, stdout, stderr, timedOut } = await run(bin, ['models']);
-  if (timedOut) return unavailable('O Antigravity não respondeu ao listar os modelos.');
+  if (timedOut) return unknown('O Antigravity não respondeu ao listar os modelos.');
   // Lines are "<id>\t<display name>"; progress messages have no tab.
   const models = stdout.split('\n').filter((line) => line.includes('\t')).map((line) => line.split('\t')[0].trim()).filter(Boolean);
   if (code !== 0 || !models.length) {
     const detail = firstLine(stderr) || firstLine(stdout);
-    return unavailable(`Antigravity indisponível${detail ? `: ${detail}` : ''}. Confira o login no agy.`);
+    if (code !== 0 && LOGIN_HINT.test(`${stderr}\n${stdout}`)) {
+      return unavailable(`Antigravity indisponível${detail ? `: ${detail}` : ''}. Confira o login no agy.`);
+    }
+    return unknown(`Não foi possível listar os modelos do Antigravity${detail ? `: ${detail}` : ''}.`);
   }
   return { status: 'available', models };
 }
@@ -91,7 +98,7 @@ async function checkCodex(bin) {
     } while (cursor && models.length < 500);
     return { status: 'available', models };
   } catch (error) {
-    return unavailable(`Codex indisponível: ${error.message}`);
+    return unknown(`Não foi possível verificar o Codex: ${error.message}`);
   } finally {
     clearTimeout(timer);
     reader.close();
@@ -103,13 +110,13 @@ async function checkClaude(bin) {
   // Same environment as the sessions, which drop API keys to use the subscription login.
   const { ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ...env } = process.env;
   const { stdout, stderr, timedOut } = await run(bin, ['auth', 'status'], env);
-  if (timedOut) return unavailable('O Claude Code não respondeu à verificação de login.');
+  if (timedOut) return unknown('O Claude Code não respondeu à verificação de login.');
   let status = null;
   try { status = JSON.parse(stdout); } catch {}
   if (status?.loggedIn) return { status: 'available', models: null };
   if (status) return unavailable('Faça login no Claude Code com "claude auth login" para usar este provedor.');
   const detail = firstLine(stderr) || firstLine(stdout);
-  return unavailable(`Claude Code indisponível${detail ? `: ${detail}` : ''}.`);
+  return unknown(`Não foi possível verificar o login do Claude Code${detail ? `: ${detail}` : ''}.`);
 }
 
 const CHECKS = { antigravity: checkAntigravity, codex: checkCodex, claude: checkClaude };
@@ -120,7 +127,7 @@ async function checkProvider(provider) {
     return unavailable(`${NAMES[provider]} não está instalado (comando "${BINS[provider]}" não encontrado).`);
   }
   try { return await CHECKS[provider](bin); }
-  catch (error) { return unavailable(`${NAMES[provider]} indisponível: ${error.message}`); }
+  catch (error) { return unknown(`Não foi possível verificar o ${NAMES[provider]}: ${error.message}`); }
 }
 
 export function createProviderAvailability({ onChange = () => {}, check = checkProvider } = {}) {

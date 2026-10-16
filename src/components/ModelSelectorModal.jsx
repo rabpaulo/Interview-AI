@@ -133,11 +133,13 @@ export function ModelSelectorModal({
             </div>
             {PROVIDER_OPTIONS.map(({ id }) => {
               const reason = unavailableReason(availability, id);
-              return reason ? (
-                <p key={id} className="mt-2 text-[11px] text-rose-300/90">
-                  <span className="font-semibold">{PROVIDERS[id].name}:</span> {reason}
+              const unverified = availability[id]?.status === 'unknown' ? availability[id].reason : null;
+              if (!reason && !unverified) return null;
+              return (
+                <p key={id} className={`mt-2 text-[11px] ${reason ? 'text-rose-300/90' : 'text-zinc-500'}`}>
+                  <span className="font-semibold">{PROVIDERS[id].name}:</span> {reason || `${unverified} O provedor continua liberado.`}
                 </p>
-              ) : null;
+              );
             })}
           </div>
 
