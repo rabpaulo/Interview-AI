@@ -6,7 +6,17 @@ Abra o app com `npm start`. No menu (☰) da barra inferior, selecione em **Mode
 
 O app prepara a sessão do agente sem enviar uma pergunta. Ao abrir, o backend verifica cada provedor sem gastar cota: se o CLI está instalado e logado e, no Antigravity (`agy models`) e no Codex (`model/list`), quais modelos a conta oferece. O Claude Code informa só o login, então todos os modelos da lista ficam liberados quando ele está logado. No seletor, provedores e modelos indisponíveis aparecem desativados, com o motivo; **Verificar novamente** refaz a verificação, por exemplo depois de um login.
 
-Se o modelo salvo deixar de estar disponível, o app troca para o primeiro modelo utilizável, do mesmo provedor se houver, e avisa no topo da janela. Sem nenhuma opção utilizável, um aviso vermelho explica o motivo, e o backend recusa iniciar o agente, a sugestão automática e as mensagens diretas. Uma falha ao iniciar ou responder também dispara uma nova verificação daquele provedor. A lista do seletor continua definida no projeto: modelos novos da conta só aparecem depois de adicionados em `src/config/models.js`.
+Se o modelo salvo deixar de estar disponível, o app troca para o primeiro modelo utilizável, do mesmo provedor se houver, e avisa no topo da janela. Sem nenhuma opção utilizável, um aviso vermelho explica o motivo, e o backend recusa iniciar o agente, a sugestão automática e as mensagens diretas. Uma falha ao iniciar ou responder também dispara uma nova verificação daquele provedor. Para Antigravity, Codex e Claude Code, a lista do seletor continua definida no projeto: modelos novos da conta só aparecem depois de adicionados em `src/config/models.js`.
+
+### OpenCode
+
+Com o [OpenCode](https://opencode.ai) instalado (`opencode` no PATH, em `~/.opencode/bin` ou em `OPENCODE_BIN`), ele aparece entre os provedores com os modelos de `opencode models`, no formato `provedor/modelo`: os modelos próprios do OpenCode (inclusive os gratuitos) e os provedores configurados nele. O app mantém um `opencode serve` local aberto, protegido por senha, para que cada resposta não espere o CLI iniciar. Os modelos `opencode/…` só aceitam o agente padrão do OpenCode, então usam o prompt de programação dele; os demais provedores recebem um agente só de texto, sem ferramentas, com o prompt curto do copiloto. As conversas ficam salvas no histórico do OpenCode.
+
+### Chaves de API
+
+Em **Menu → Chaves de API** (ou **Gerenciar keys** no seletor de modelo), cole a key de OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, DeepSeek, Mistral ou xAI. O backend valida a key listando os modelos da conta, sem gastar tokens, e o provedor passa a aparecer em **Modelo** com esses modelos; uma key recusada aparece como **Inválida**. Para um modelo que não estiver na lista, informe o ID em **Outro modelo**. As keys ficam em `api-keys.json`, ao lado do perfil (`~/.local/share/interviewai/` no Linux, `%APPDATA%\InterviewAI\` no Windows), legíveis só pelo seu usuário; a interface nunca recebe a key de volta, só os últimos caracteres. Sem key salva, o app usa a variável de ambiente do provedor (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`...). As keys também são repassadas ao OpenCode, que então oferece os modelos desses provedores.
+
+Nesses provedores o histórico da conversa fica na memória do backend e vai junto a cada pergunta, até ser apagado por **Nova sessão**. Em **Raciocínio**, **Padrão** não envia nível de esforço; OpenAI, Anthropic, Gemini e OpenRouter aceitam Low, Médio e High (modelos sem raciocínio podem recusar o parâmetro). Nos modelos Claude Fable 5.1, Opus 5.5, Opus 5 e Sonnet 5.5 o app ativa o fallback de recusa da Anthropic, que reenvia a pergunta a outro modelo se a resposta for recusada.
 
 ## Meu contexto
 

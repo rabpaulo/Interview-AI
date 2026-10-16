@@ -19,6 +19,7 @@
     "eval:copilot": "node scripts/evaluate-copilot.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "cross-spawn": "^7.0.6",

@@ -3,6 +3,9 @@ import { runCodexAgent, prepareCodexSession, closeCodexSession } from './codex-s
 import { runClaudeAgent, prepareClaudeSession, closeClaudeSession } from './claude-session.js';
 import { normalizeImages, promptWithImageFiles, writeImageFiles } from './agent-images.js';
 import { killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
+import { runOpencodeAgent, prepareOpencodeSession, closeOpencodeSession } from './opencode-session.js';
+import { runApiAgent, prepareApiSession } from './api-session.js';
+import { isApiProvider } from '../shared/api-providers.js';
 export { runCodexAgent, closeCodexSession } from './codex-session.js';
 export { runClaudeAgent, closeClaudeSession } from './claude-session.js';
 
@@ -37,6 +40,7 @@ function rewarmAgySession(session) {
 process.on('exit', closeAgySession);
 process.on('exit', closeCodexSession);
 process.on('exit', closeClaudeSession);
+process.on('exit', closeOpencodeSession);
 
 /** Start the CLI without submitting a model turn. */
 // An isolated session serves a single turn and never replaces the warm session.
@@ -162,6 +166,8 @@ export function runAgyAgent({ onMessage, onError, onClose, prompt, images, ...op
 export function prepareAgentSession(options) {
   if (options.provider === 'codex') return prepareCodexSession(options);
   if (options.provider === 'claude') return prepareClaudeSession(options);
+  if (options.provider === 'opencode') return prepareOpencodeSession(options);
+  if (isApiProvider(options.provider)) return prepareApiSession(options);
   return prepareAgySession(options);
 }
 
@@ -169,6 +175,7 @@ export function closeAgentSession(provider) {
   if (!provider || provider === 'antigravity') closeAgySession();
   if (!provider || provider === 'codex') closeCodexSession();
   if (!provider || provider === 'claude') closeClaudeSession();
+  if (!provider || provider === 'opencode') closeOpencodeSession();
 }
 
 /**
@@ -215,9 +222,11 @@ export function runIsolatedAgent({ timeoutMs = 120000, onText, signal, ...option
 }
 
 /**
- * Unified runner that dispatches to Antigravity, Codex or Claude Code.
+ * Unified runner that dispatches to Antigravity, Codex, Claude Code, OpenCode or an API provider.
  */
 export function runUnifiedAgent(options) {
+  if (options.provider === 'opencode') return runOpencodeAgent(options);
+  if (isApiProvider(options.provider)) return runApiAgent(options);
   if (options.provider === 'codex') {
     return runCodexAgent(options);
   }

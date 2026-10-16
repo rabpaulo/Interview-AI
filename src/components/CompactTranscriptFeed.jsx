@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { FormattedAgentResponse } from './CodeBlock.jsx';
 import { NotesCard } from './NotesCard.jsx';
+import { PROVIDERS } from '../config/models.js';
 
 const AGENT_STYLES = {
   antigravity: { name: 'ANTIGRAVITY', fallbackModel: 'Gemini', Icon: Sparkles, card: 'border-cyan-500/25 bg-[#0f1422]/85',
@@ -26,7 +27,18 @@ const AGENT_STYLES = {
     divider: 'border-purple-500/15', icon: 'text-purple-400', label: 'text-purple-300' },
   claude: { name: 'CLAUDE CODE', fallbackModel: 'Claude', Icon: Asterisk, card: 'border-amber-500/25 bg-[#1a140c]/85',
     divider: 'border-amber-500/15', icon: 'text-amber-400', label: 'text-amber-300' },
+  opencode: { name: 'OPENCODE', fallbackModel: 'OpenCode', Icon: Terminal, card: 'border-emerald-500/25 bg-[#0d1714]/85',
+    divider: 'border-emerald-500/15', icon: 'text-emerald-400', label: 'text-emerald-300' },
 };
+
+// Providers reached with an API key share one look, labeled with their name.
+function agentStyle(provider) {
+  if (AGENT_STYLES[provider]) return AGENT_STYLES[provider];
+  const config = PROVIDERS[provider];
+  if (!config) return AGENT_STYLES.antigravity;
+  return { name: config.shortName.toUpperCase(), fallbackModel: config.shortName, Icon: Cpu, card: 'border-sky-500/25 bg-[#0e1520]/85',
+    divider: 'border-sky-500/15', icon: 'text-sky-400', label: 'text-sky-300' };
+}
 
 // Stable default, since the feed's scroll effect depends on it.
 const NO_NOTES = {};
@@ -306,8 +318,8 @@ export function CompactTranscriptFeed({
             );
           }
 
-          // 4. Agent Code / Task Output (Antigravity / Codex / Claude Code)
-          const style = AGENT_STYLES[item.provider] || AGENT_STYLES.antigravity;
+          // 4. Agent Code / Task Output
+          const style = agentStyle(item.provider);
           const AgentIcon = style.Icon;
           return (
             <React.Fragment key={key}>

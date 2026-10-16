@@ -1,3 +1,5 @@
+import { API_PROVIDERS, apiReasoningLevels } from '../../shared/api-providers.js';
+
 export const PROVIDERS = {
   antigravity: {
     id: 'antigravity',
@@ -201,4 +203,36 @@ export const PROVIDERS = {
     ],
     supportsFastMode: false,
   },
+  opencode: {
+    id: 'opencode',
+    name: 'OpenCode',
+    shortName: 'OpenCode',
+    tagline: 'OpenCode CLI com os provedores configurados nele',
+    kind: 'cli',
+    // Models come from `opencode models` ("provedor/modelo").
+    defaultModel: null,
+    dynamicModels: true,
+    models: [],
+    reasoningLevels: [{ id: 'default', label: 'Padrão', hint: 'Padrão do modelo' }],
+    defaultReasoning: 'default',
+    supportsFastMode: false,
+  },
+  ...Object.fromEntries(Object.values(API_PROVIDERS).map((api) => [api.id, {
+    id: api.id,
+    name: api.name,
+    shortName: api.shortName,
+    tagline: api.tagline,
+    kind: 'api',
+    keyUrl: api.keyUrl,
+    keyPrefix: api.keyPrefix,
+    defaultModel: null,
+    dynamicModels: true,
+    models: [],
+    reasoningLevels: apiReasoningLevels(api.id),
+    defaultReasoning: 'default',
+    supportsFastMode: false,
+  }])),
 };
+
+export const CLI_PROVIDER_IDS = Object.keys(PROVIDERS).filter((id) => PROVIDERS[id].kind !== 'api');
+export const API_PROVIDER_LIST = Object.values(PROVIDERS).filter((provider) => provider.kind === 'api');

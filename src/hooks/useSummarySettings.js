@@ -9,7 +9,11 @@ function load() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     const provider = PROVIDERS[saved.provider] ? saved.provider : null;
-    const model = provider && PROVIDERS[provider].models.some((entry) => entry.id === saved.model) ? saved.model : null;
+    // Providers whose models come from the account cannot be checked before it answers.
+    const knownModel = provider && (PROVIDERS[provider].dynamicModels
+      ? typeof saved.model === 'string' && saved.model
+      : PROVIDERS[provider].models.some((entry) => entry.id === saved.model));
+    const model = knownModel ? saved.model : null;
     return {
       auto: typeof saved.auto === 'boolean' ? saved.auto : DEFAULTS.auto,
       provider,

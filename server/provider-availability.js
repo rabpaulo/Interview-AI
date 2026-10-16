@@ -1,16 +1,22 @@
 import readline from 'node:readline';
 import { agentWorkspace, cliAvailable, killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
+import { API_PROVIDERS, API_PROVIDER_IDS, chatModels } from '../shared/api-providers.js';
+import { listApiModels } from './api-session.js';
+import { opencodeEnv } from './opencode-session.js';
 
 // Each check asks the CLI about the login and the account's models without sending
 // a prompt, so it uses no model quota. Only a definite answer (not installed, logged
 // out, model not listed) blocks a provider; a timeout or unexpected output leaves it
 // usable as "unknown", so a network hiccup never stops the CLI from being prepared.
+// API providers list the key's models the same way; a rejected key blocks them.
+// `catalog` ({ id, name }) is the model list the client shows for providers whose
+// models come from the account instead of src/config/models.js.
 const CHECK_TIMEOUT_MS = 20000;
 // Failed turns ask for a recheck; this keeps a burst of errors from spawning one each.
 const RECHECK_INTERVAL_MS = 15000;
 
-const NAMES = { antigravity: 'Antigravity', codex: 'Codex', claude: 'Claude Code' };
-const BINS = { antigravity: 'agy', codex: 'codex', claude: 'claude' };
+const NAMES = { antigravity: 'Antigravity', codex: 'Codex', claude: 'Claude Code', opencode: 'OpenCode' };
+const BINS = { antigravity: 'agy', codex: 'codex', claude: 'claude', opencode: 'opencode' };
 
 const unavailable = (reason) => ({ status: 'unavailable', reason });
 const unknown = (reason) => ({ status: 'unknown', reason });
@@ -119,9 +125,37 @@ async function checkClaude(bin) {
   return unknown(`Não foi possível verificar o login do Claude Code${detail ? `: ${detail}` : ''}.`);
 }
 
-const CHECKS = { antigravity: checkAntigravity, codex: checkCodex, claude: checkClaude };
+// Lines are "<provider>/<model>"; the list includes the providers whose key was saved here.
+async function checkOpencode(bin) {
+  const { code, stdout, stderr, timedOut } = await run(bin, ['models'], opencodeEnv());
+  if (timedOut) return unknown('O OpenCode não respondeu ao listar os modelos.');
+  const models = stdout.split('\n').map((line) => line.trim()).filter((line) => /^[\w.-]+\/\S+$/.test(line));
+  if (code !== 0 || !models.length) {
+    const detail = firstLine(stderr) || firstLine(stdout);
+    return unknown(`Não foi possível listar os modelos do OpenCode${detail ? `: ${detail}` : ''}.`);
+  }
+  return { status: 'available', models, catalog: models.map((id) => ({ id, name: id })) };
+}
+
+async function checkApi(provider) {
+  const result = await listApiModels(provider);
+  if (!result.models) return result;
+  const catalog = chatModels(provider, result.models);
+  // An empty filtered list means the filter missed this account's names, not that nothing works.
+  const listed = catalog.length ? catalog : result.models;
+  return { status: 'available', models: listed.map((model) => model.id), catalog: listed };
+}
+
+const CHECKS = {
+  antigravity: checkAntigravity, codex: checkCodex, claude: checkClaude, opencode: checkOpencode,
+  ...Object.fromEntries(API_PROVIDER_IDS.map((id) => [id, () => checkApi(id)])),
+};
 
 async function checkProvider(provider) {
+  if (API_PROVIDERS[provider]) {
+    try { return await CHECKS[provider](); }
+    catch (error) { return unknown(`Não foi possível verificar ${API_PROVIDERS[provider].shortName}: ${error.message}`); }
+  }
   const bin = resolveCliBin(BINS[provider]);
   if (!cliAvailable(bin)) {
     return unavailable(`${NAMES[provider]} não está instalado (comando "${BINS[provider]}" não encontrado).`);

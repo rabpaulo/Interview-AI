@@ -99,14 +99,18 @@ export function useAgentSettings() {
 
   const currentProviderConfig = PROVIDERS[provider];
   const currentModelId = models[provider] || currentProviderConfig.defaultModel;
+  // Providers whose models come from the account have no fixed entry: the id is the name.
   const currentModel = useMemo(() => {
     return (
       currentProviderConfig.models.find((m) => m.id === currentModelId) ||
-      currentProviderConfig.models[0]
+      (currentModelId ? { id: currentModelId, name: currentModelId } : currentProviderConfig.models[0])
     );
   }, [currentProviderConfig, currentModelId]);
 
-  const currentReasoning = reasoningEfforts[provider] || currentProviderConfig.defaultReasoning;
+  const savedReasoning = reasoningEfforts[provider];
+  const currentReasoning = currentProviderConfig.reasoningLevels.some((level) => level.id === savedReasoning)
+    ? savedReasoning
+    : currentProviderConfig.defaultReasoning;
 
   return {
     provider,

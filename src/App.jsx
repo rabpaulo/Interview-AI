@@ -10,6 +10,7 @@ import { ModelSelectorModal } from './components/ModelSelectorModal.jsx';
 import { PersonaSelectorModal } from './components/PersonaSelectorModal.jsx';
 import { CandidateContextEditor } from './components/CandidateContextEditor.jsx';
 import { NotesVaultModal } from './components/NotesVaultModal.jsx';
+import { ApiKeysModal } from './components/ApiKeysModal.jsx';
 import { useVoiceCopilot } from './hooks/useVoiceCopilot.js';
 import { useAgentSocket } from './hooks/useAgentSocket.js';
 import { useAgentSettings } from './hooks/useAgentSettings.js';
@@ -35,6 +36,7 @@ export default function App() {
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false);
   const [isContextOpen, setIsContextOpen] = useState(false);
   const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [isKeysOpen, setIsKeysOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionToast, setSessionToast] = useState(null);
   const [isCompact, setIsCompact] = useState(() => {
@@ -105,6 +107,8 @@ export default function App() {
     if (!selectionFallback) return;
     if (selectionFallback.provider !== agentSettings.provider) agentSettings.setProvider(selectionFallback.provider);
     agentSettings.setModel(selectionFallback.model, selectionFallback.provider);
+    // A provider with no model chosen yet just takes the first listed one.
+    if (selectionFallback.provider === agentSettings.provider && !agentSettings.currentModelId) return;
     setSessionToast(`${selectionReason} Usando ${PROVIDERS[selectionFallback.provider].name} · ${selectionFallback.modelName}.`);
   }, [selectionFallback?.provider, selectionFallback?.model]);
   // With nothing usable, the selection stays and this banner explains why.
@@ -333,7 +337,7 @@ export default function App() {
     if (isPcCapturing) stopPcCapture();
     else startPcCapture();
   };
-  const isWindowDraggable = !isModelModalOpen && !isPersonaModalOpen && !isContextOpen && !isNotesOpen;
+  const isWindowDraggable = !isModelModalOpen && !isPersonaModalOpen && !isContextOpen && !isNotesOpen && !isKeysOpen;
   const menuProps = {
     language,
     setLanguage,
@@ -342,6 +346,7 @@ export default function App() {
     onOpenModelModal: () => setIsModelModalOpen(true),
     onOpenPersonaModal: () => setIsPersonaModalOpen(true),
     onOpenNotesModal: () => setIsNotesOpen(true),
+    onOpenKeysModal: () => setIsKeysOpen(true),
     notesStatus: notesVault.status,
     onNewSession: handleNewSession,
     isCompact,
@@ -534,7 +539,10 @@ export default function App() {
         toggleFastMode={agentSettings.toggleFastMode}
         availability={providerAvailability}
         onRefreshAvailability={refreshProviders}
+        onOpenKeys={() => setIsKeysOpen(true)}
       />
+
+      <ApiKeysModal isOpen={isKeysOpen} onClose={() => setIsKeysOpen(false)} availability={providerAvailability} />
 
       {isContextOpen && (
         <CandidateContextEditor

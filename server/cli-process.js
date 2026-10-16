@@ -40,9 +40,12 @@ const KNOWN_LOCATIONS = {
   claude: isWindows
     ? [path.join(home, '.local', 'bin', 'claude.exe'), path.join(appData, 'npm', 'claude.cmd')]
     : [path.join(home, '.local', 'bin', 'claude'), '/usr/bin/claude', '/usr/local/bin/claude'],
+  opencode: isWindows
+    ? [path.join(appData, 'npm', 'opencode.cmd'), path.join(home, '.opencode', 'bin', 'opencode.exe')]
+    : [path.join(home, '.opencode', 'bin', 'opencode'), path.join(home, '.local', 'bin', 'opencode'), '/usr/local/bin/opencode', '/usr/bin/opencode'],
 };
 
-const ENV_NAMES = { agy: 'AGY_BIN', codex: 'CODEX_BIN', claude: 'CLAUDE_BIN' };
+const ENV_NAMES = { agy: 'AGY_BIN', codex: 'CODEX_BIN', claude: 'CLAUDE_BIN', opencode: 'OPENCODE_BIN' };
 
 /**
  * Empty working directory for the agent CLIs. Outside the project, they find no

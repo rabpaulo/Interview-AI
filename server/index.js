@@ -25,6 +25,9 @@ import { AVAILABLE_MODELS, AVAILABLE_PERSONAS, generateCopilotResponse } from '.
 import { AUTO_LANGUAGE, LANGUAGES } from '../shared/language.js';
 import { unavailableReason } from '../shared/provider-availability.js';
 import { createProviderAvailability } from './provider-availability.js';
+import { providerKeys } from './provider-keys.js';
+import { resetApiConversations } from './api-session.js';
+import { API_PROVIDER_IDS, isApiProvider } from '../shared/api-providers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,16 +54,17 @@ if (fs.existsSync(distPath)) {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const activeConversationIds = {
-  antigravity: null,
-  codex: null,
-  claude: null,
-};
+const PROVIDER_IDS = ['antigravity', 'codex', 'claude', 'opencode', ...API_PROVIDER_IDS];
+const activeConversationIds = Object.fromEntries(PROVIDER_IDS.map((id) => [id, null]));
 const DEFAULT_MODELS = {
   antigravity: 'gemini-3.8-flash',
   codex: 'gpt-6-luna',
   claude: 'claude-sonnet-5-5',
 };
+// OpenCode and the API providers have no fixed list: their first listed model is the default.
+function defaultModelFor(provider) {
+  return DEFAULT_MODELS[provider] || providerAvailability.state()[provider]?.models?.[0] || null;
+}
 let activeAgentProcess = null;
 let copilotGeneration = 0;
 let agentTurnCounter = 0;
@@ -202,6 +206,7 @@ function resetAgentSession(provider) {
   preparationGeneration++;
   preparationKey = null;
   closeAgentSession(provider);
+  if (!provider || isApiProvider(provider)) resetApiConversations();
   if (provider && activeConversationIds[provider] !== undefined) activeConversationIds[provider] = null;
   else {
     for (const name of Object.keys(activeConversationIds)) activeConversationIds[name] = null;
@@ -241,7 +246,7 @@ const liveCopilot = createLiveCopilot({
 function summaryConfig() {
   const provider = summarySettings.provider || selectedProvider;
   const model = summarySettings.provider
-    ? summarySettings.model || DEFAULT_MODELS[provider] || DEFAULT_MODELS.antigravity
+    ? summarySettings.model || defaultModelFor(provider)
     : selectedModel;
   return { auto: summarySettings.auto, provider, model, fastMode: selectedFastMode, error: blockedReason(provider, model) };
 }
@@ -342,7 +347,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
   };
 
   const provider = overrideOptions.provider || selectedProvider || 'antigravity';
-  const model = overrideOptions.model || selectedModel || (DEFAULT_MODELS[provider] || DEFAULT_MODELS.antigravity);
+  const model = overrideOptions.model || selectedModel || defaultModelFor(provider);
   const persona = overrideOptions.persona || selectedPersona;
   const reasoningEffort = overrideOptions.reasoningEffort || selectedReasoningEffort || 'medium';
   const fastMode = overrideOptions.fastMode !== undefined ? overrideOptions.fastMode : selectedFastMode;
@@ -559,6 +564,43 @@ app.get('/api/notes/search', (req, res) => {
   const started = performance.now();
   const hits = notesVault.search(String(req.query.q || '')).map(publicHit);
   res.json({ hits, ms: Number((performance.now() - started).toFixed(1)) });
+});
+
+// API keys: the client sends a key once and only ever gets back whether one exists.
+function keysResponse() {
+  return { keys: providerKeys.summary(), file: providerKeys.file };
+}
+
+// A new key changes what the provider, and OpenCode with it, can offer.
+function refreshForKeys(provider) {
+  providerAvailability.refresh(provider, { force: true });
+  providerAvailability.refresh('opencode', { force: true });
+}
+
+app.get('/api/provider-keys', (req, res) => res.json(keysResponse()));
+
+app.put('/api/provider-keys/:provider', (req, res) => {
+  const { provider } = req.params;
+  if (!isApiProvider(provider)) return res.status(404).json({ error: 'Provedor desconhecido.' });
+  try {
+    providerKeys.set(provider, req.body?.key);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  refreshForKeys(provider);
+  res.json(keysResponse());
+});
+
+app.delete('/api/provider-keys/:provider', (req, res) => {
+  const { provider } = req.params;
+  if (!isApiProvider(provider)) return res.status(404).json({ error: 'Provedor desconhecido.' });
+  try {
+    providerKeys.remove(provider);
+  } catch (error) {
+    return res.status(500).json({ error: `Não foi possível remover a key: ${error.message}` });
+  }
+  refreshForKeys(provider);
+  res.json(keysResponse());
 });
 
 app.post('/api/settings', (req, res) => {
@@ -882,7 +924,7 @@ function handleClientMessage(ws, data) {
     const { auto, provider, model, saveOnReset } = data.settings || {};
     summarySettings = {
       auto: auto !== undefined ? !!auto : summarySettings.auto,
-      provider: provider === undefined ? summarySettings.provider : DEFAULT_MODELS[provider] ? provider : null,
+      provider: provider === undefined ? summarySettings.provider : PROVIDER_IDS.includes(provider) ? provider : null,
       model: model === undefined ? summarySettings.model : (typeof model === 'string' && model) || null,
       saveOnReset: saveOnReset !== undefined ? !!saveOnReset : summarySettings.saveOnReset,
     };
@@ -900,7 +942,7 @@ function handleClientMessage(ws, data) {
     }
 
     const provider = data.provider || selectedProvider || 'antigravity';
-    const model = data.model || selectedModel || (DEFAULT_MODELS[provider] || DEFAULT_MODELS.antigravity);
+    const model = data.model || selectedModel || defaultModelFor(provider);
     const reasoningEffort = data.reasoningEffort || selectedReasoningEffort || 'medium';
     const fastMode = data.fastMode !== undefined ? data.fastMode : selectedFastMode;
     const currentConvId = activeConversationIds[provider] || null;

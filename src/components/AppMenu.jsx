@@ -17,6 +17,9 @@ import {
   Camera,
   Minimize2,
   NotebookText,
+  KeyRound,
+  Terminal,
+  Cpu,
 } from 'lucide-react';
 
 import { getPersonaById } from '../config/personas.js';
@@ -37,6 +40,7 @@ export function AppMenu({
   onOpenModelModal,
   onOpenPersonaModal,
   onOpenNotesModal,
+  onOpenKeysModal,
   notesStatus,
   onNewSession,
   onOpenChange,
@@ -108,7 +112,7 @@ export function AppMenu({
 
   const { provider, currentProviderConfig, currentModel, fastMode } = agentSettings;
   const currentPersona = getPersonaById(selectedPersona);
-  const ProviderIcon = provider === 'codex' ? Bot : provider === 'claude' ? Asterisk : Sparkles;
+  const ProviderIcon = { antigravity: Sparkles, codex: Bot, claude: Asterisk, opencode: Terminal }[provider] || Cpu;
   const needsCompositor = window.interviewaiDesktop?.usesCssOpacity;
 
   return (
@@ -142,6 +146,14 @@ export function AppMenu({
             <span className="ml-auto truncate text-zinc-100 font-medium">{currentPersona?.shortName || 'Reunião Geral'}</span>
             <ChevronRight size={12} className="text-zinc-500 shrink-0" />
           </button>
+
+          {onOpenKeysModal && (
+            <button type="button" role="menuitem" onClick={runAndClose(onOpenKeysModal)} className="app-menu-item">
+              <KeyRound size={14} className="text-zinc-400 shrink-0" />
+              <span className="text-zinc-400">Chaves de API</span>
+              <ChevronRight size={12} className="ml-auto text-zinc-500 shrink-0" />
+            </button>
+          )}
 
           {onOpenNotesModal && (
             <button type="button" role="menuitem" onClick={runAndClose(onOpenNotesModal)} className="app-menu-item">

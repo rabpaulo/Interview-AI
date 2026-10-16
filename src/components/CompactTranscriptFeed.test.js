@@ -55,6 +55,7 @@ function createFeedHarness() {
     useLayoutEffect: effect,
     Date, setTimeout,
     navigator: { clipboard: { writeText() {} } },
+    PROVIDERS: {},
     ...Object.fromEntries(['Sparkles', 'Mic', 'Copy', 'Check', 'StopCircle', 'Clock', 'Terminal', 'Bot', 'Asterisk', 'Monitor', 'Send', 'FileText', 'RotateCw', 'Cpu', 'ArrowDown', 'FormattedAgentResponse', 'NotesCard'].map((name) => [name, name])),
   });
   vm.runInContext(code, context);

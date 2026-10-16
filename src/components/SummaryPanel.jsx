@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { FileText, Sparkles, Copy, Check, FolderDown, BookOpen, Settings2, X, AlertCircle } from 'lucide-react';
 import { FormattedAgentResponse } from './CodeBlock.jsx';
 import { PROVIDERS } from '../config/models.js';
-import { unavailableReason } from '../../shared/provider-availability.js';
+import { providerModels, unavailableReason } from '../../shared/provider-availability.js';
 
 const SAME_MODEL = '';
 
@@ -101,9 +101,11 @@ export function SummaryPanel({
                 className="w-full rounded bg-zinc-900 border border-white/10 px-1.5 py-1 text-[11px] text-zinc-200 cursor-pointer"
               >
                 <option value={SAME_MODEL}>Mesmo modelo da conversa</option>
-                {Object.values(PROVIDERS).map((provider) => (
+                {Object.values(PROVIDERS).map((provider) => ({ provider, models: providerModels(provider, availability?.[provider.id]) }))
+                  .filter(({ models }) => models.length)
+                  .map(({ provider, models }) => (
                   <optgroup key={provider.id} label={provider.name}>
-                    {provider.models.map((model) => {
+                    {models.map((model) => {
                       const reason = unavailableReason(availability, provider.id, model.id, model.name);
                       return (
                         <option key={model.id} value={`${provider.id}:${model.id}`} disabled={!!reason}>
