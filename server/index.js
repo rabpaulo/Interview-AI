@@ -5,7 +5,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { runUnifiedAgent, runIsolatedAgent, prepareAgentSession, closeAgentSession } from './agent-bridge.js';
+import { runUnifiedAgent, runIsolatedAgent, prepareAgentSession, closeAgentSession, prepareOneShotSessions, runsOneShot } from './agent-bridge.js';
 import { importDocument, ImportError, MAX_IMPORT_BYTES } from './document-import.js';
 import { systemAudioEngine, SystemAudioEngine } from './system-audio-engine.js';
 import { transcribeAudioBuffer } from './transcriber.js';
@@ -160,8 +160,10 @@ function prepareSelectedSession() {
   const generation = ++preparationGeneration;
   agentSession = { status: 'starting', provider };
   broadcast({ type: 'agent_session', ...agentSession });
-  prepareAgentSession({ provider, model: selectedModel, reasoningEffort: selectedReasoningEffort,
-    fastMode: selectedFastMode, conversationId: activeConversationIds[provider], cwd: agentWorkspace() })
+  const options = { provider, model: selectedModel, reasoningEffort: selectedReasoningEffort,
+    fastMode: selectedFastMode, cwd: agentWorkspace() };
+  prepareOneShotSessions(options);
+  prepareAgentSession({ ...options, conversationId: activeConversationIds[provider] })
     .then(({ conversationId, pid }) => {
       if (generation !== preparationGeneration) return;
       activeConversationIds[provider] = conversationId;
@@ -236,6 +238,7 @@ systemAudioEngine.on('level', ({ level, rms }) => {
 const liveCopilot = createLiveCopilot({
   enabled: () => autoRespond,
   canStart: () => !activeAgentProcess,
+  speculate: () => runsOneShot(selectedProvider),
   start: ({ text, utteranceId, isPreview, onSettled }) => triggerCopilotForText(text, {
     replyId: `copilot-pc-${utteranceId}`, utteranceId, isPreview, onSettled,
   }),
@@ -262,6 +265,17 @@ const summaryService = createSummaryService({
 
 function recordTranscript(role, text, options) {
   if (sessionTranscript.add(role, text, options)) summaryService.noteActivity();
+}
+
+// One-shot live answers never enter the CLI conversation, so a direct message
+// carries what was said and suggested since the previous direct message.
+function meetingSinceLastMessage(provider) {
+  if (!runsOneShot(provider)) return [];
+  const entries = sessionTranscript.entries();
+  const lastMessage = entries.findLastIndex((entry) => entry.role === 'user');
+  return entries.slice(lastMessage + 1)
+    .filter((entry) => entry.role === 'interlocutor' || entry.id?.startsWith('copilot-'))
+    .slice(-8);
 }
 
 function sessionsDir() {
@@ -327,7 +341,9 @@ systemAudioEngine.on('status', (status) => {
 
 function triggerCopilotForText(transcript, overrideOptions = {}) {
   if (!transcript?.trim()) return;
-  conversationMemory.remember('interlocutor', transcript);
+  // A preview answers speech still in progress; only the complete utterance is remembered.
+  const startsAsPreview = typeof overrideOptions.isPreview === 'function' ? overrideOptions.isPreview() : !!overrideOptions.isPreview;
+  if (!startsAsPreview) conversationMemory.remember('interlocutor', transcript);
   // PC utterances were recorded when transcribed; this is a typed or repeated trigger.
   if (!overrideOptions.utteranceId && transcript !== lastPcTranscript) recordTranscript('interlocutor', transcript);
 
@@ -351,7 +367,10 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
   const persona = overrideOptions.persona || selectedPersona;
   const reasoningEffort = overrideOptions.reasoningEffort || selectedReasoningEffort || 'medium';
   const fastMode = overrideOptions.fastMode !== undefined ? overrideOptions.fastMode : selectedFastMode;
-  const convId = activeConversationIds[provider] || null;
+  // Live answers carry the recent speech in the prompt, so they can run outside the
+  // conversation where that makes cancelling a preview cheap.
+  const oneShot = runsOneShot(provider);
+  const convId = oneShot ? null : activeConversationIds[provider] || null;
   // PC utterances already showed their notes card through notes_hits.
   const notes = notesLookup.lookup(overrideOptions.utteranceId || null, transcript);
 
@@ -380,7 +399,8 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
     reasoningEffort,
     fastMode,
     conversationId: convId,
-    isPreview: isPreview(),
+    oneShot,
+    // A preview uses the complete prompt: when the final transcript matches it, it is the answer.
     candidateContext,
     recentTurns: conversationMemory.beforeQuestion(transcript),
     notes,
@@ -405,7 +425,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
     },
     onComplete: (response, resConvId) => {
       if (generation !== copilotGeneration || settled) return;
-      if (resConvId) activeConversationIds[provider] = resConvId;
+      if (resConvId && !oneShot) activeConversationIds[provider] = resConvId;
       recordTranscript('assistant', response, { id: replyId });
       broadcast({
         type: 'copilot_completed',
@@ -415,7 +435,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
         provider,
         model,
         persona,
-        conversationId: resConvId,
+        conversationId: oneShot ? null : resConvId,
         timestamp: Date.now(),
       });
       activeAgentProcess = null;
@@ -726,6 +746,7 @@ app.post('/api/message', (req, res) => {
 
   let finalResponse = '';
   const convId = activeConversationIds[provider];
+  const meeting = meetingSinceLastMessage(provider);
   conversationMemory.remember('user', turn.memory);
   recordTranscript('user', turn.memory);
 
@@ -734,7 +755,7 @@ app.post('/api/message', (req, res) => {
     model,
     reasoningEffort,
     fastMode,
-    prompt: buildAgentPrompt(turn.request, candidateProfile, notesVault.search(turn.request)),
+    prompt: buildAgentPrompt(turn.request, candidateProfile, notesVault.search(turn.request), meeting),
     images: turn.images,
     conversationId: convId,
     cwd: agentWorkspace(),
@@ -958,6 +979,7 @@ function handleClientMessage(ws, data) {
       activeAgentProcess = null;
     }
 
+    const meeting = meetingSinceLastMessage(provider);
     // Broadcast user message to UI
     conversationMemory.remember('user', turn.memory);
     recordTranscript('user', turn.memory);
@@ -999,7 +1021,7 @@ function handleClientMessage(ws, data) {
       model,
       reasoningEffort,
       fastMode,
-      prompt: buildAgentPrompt(prompt, candidateProfile, notes),
+      prompt: buildAgentPrompt(prompt, candidateProfile, notes, meeting),
       images: turn.images,
       conversationId: currentConvId,
       cwd: agentWorkspace(),

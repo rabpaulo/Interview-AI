@@ -119,7 +119,7 @@ O backend não carrega `.env` automaticamente. Exporte as variáveis no shell ou
 | src/components/DocumentDropZone.jsx | Área de arrastar ou escolher arquivo das abas Perfil e Vaga. |
 | server/pc-transcription.js | Encaminhamento dos trechos do PC ao transcritor. |
 | server/transcriber.js e server/transcribe.py | Processo de reconhecimento e limpeza de áudio temporário. |
-| server/live-copilot.js | Agendamento de respostas para falas consolidadas. |
+| server/live-copilot.js | Agendamento de respostas: prévias durante a fala e resposta à fala consolidada. |
 | server/gemini-copilot.js | Prompts das personas e despacho para ambos os provedores. |
 | server/agent-bridge.js, server/codex-session.js e server/claude-session.js | Processos persistentes dos CLIs. |
 | server/agent-images.js | Validação das imagens anexadas (até 4, base64 PNG/JPEG/WebP) e formato de cada CLI: inline no Codex e no Claude Code; arquivo temporário no Antigravity. |

@@ -69,7 +69,7 @@ São indexados até 5.000 arquivos de até 512 KB. Notas, anexos e imagens não 
 
 ## Áudio e respostas
 
-A captura do PC usa a saída de áudio padrão e tenta iniciar quando o app abre. No Linux, o backend lê o monitor da saída com `parec`; no Windows, a janela do Electron captura o loopback do sistema (o que está tocando nos alto-falantes ou fones) e envia o áudio ao backend pela conexão local. Os medidores permitem acompanhar e controlar a captura. A transcrição parcial aparece enquanto a pessoa fala, mas o modo automático só envia a fala consolidada ao modelo.
+A captura do PC usa a saída de áudio padrão e tenta iniciar quando o app abre. No Linux, o backend lê o monitor da saída com `parec`; no Windows, a janela do Electron captura o loopback do sistema (o que está tocando nos alto-falantes ou fones) e envia o áudio ao backend pela conexão local. Os medidores permitem acompanhar e controlar a captura. A transcrição parcial aparece enquanto a pessoa fala. Com Antigravity ou um provedor por API key, o modo automático já mostra uma prévia da sugestão durante a fala e a atualiza conforme a pergunta cresce; a prévia vira a resposta quando a fala consolidada for igual a ela. Com Codex, Claude Code e OpenCode, só a fala consolidada vai ao modelo.
 
 Após cerca de 900 ms de silêncio, o app encerra o trecho. Uma pausa no meio da pergunta também pode encerrá-lo: a detecção é baseada em áudio, sem análise semântica do fim da pergunta. Se isso atrapalhar a entrevista, desative o modo automático e use **Diga isso** após conferir a transcrição. O botão usa a última fala consolidada; ele não junta automaticamente vários trechos.
 

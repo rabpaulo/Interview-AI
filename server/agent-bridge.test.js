@@ -252,3 +252,27 @@ test('isolated runs use their own process and leave the warm session untouched',
   }
   await assert.rejects(bridge.runIsolatedAgent({ provider: 'claude', prompt: '__error__' }), /Falha simulada/);
 });
+
+test('one-shot turns use pre-started processes and leave the conversation untouched', { timeout: 3000 }, async (t) => {
+  fixture(t);
+  const conversation = await turn({ prompt: 'conversa' });
+  bridge.prepareOneShotSessions({ provider: 'antigravity' });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const started = Date.now();
+  const cancelled = bridge.runAgyAgent({ prompt: '__wait__', oneShot: true, onMessage() {}, onError() {}, onClose() {} });
+  cancelled.kill();
+  const next = await turn({ prompt: 'rápida', oneShot: true });
+  assert.ok(Date.now() - started < 140, 'the next one-shot turn must not wait for a cold start');
+  assert.equal(next.result.response, 'rápida');
+  assert.notEqual(next.handle.pid, cancelled.pid);
+  assert.notEqual(next.result.conversation_id, conversation.result.conversation_id);
+  const continued = await turn({ prompt: 'continua', conversationId: conversation.result.conversation_id });
+  assert.equal(continued.handle.pid, conversation.handle.pid, 'the warm conversation keeps its process');
+});
+
+test('only Antigravity and HTTP providers answer live speech as one-shot turns', () => {
+  assert.equal(bridge.runsOneShot('antigravity'), true);
+  assert.equal(bridge.runsOneShot('gemini'), true);
+  assert.equal(bridge.runsOneShot('codex'), false);
+  assert.equal(bridge.runsOneShot('claude'), false);
+});

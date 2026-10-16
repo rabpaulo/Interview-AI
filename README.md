@@ -71,7 +71,7 @@ Para instalar as dependências de áudio e entender os modos de execução, cons
 1. No menu (☰) da barra inferior, escolha o modelo e o modo (tipo de entrevista).
 2. Abra **Meu contexto**, no ícone de pessoa da barra inferior. Na aba **Perfil**, arraste seu currículo para **Importar currículo** (ou clique para escolher o arquivo); a IA preenche os campos e as experiências. Revise e ajuste.
 3. Na aba **Vaga**, arraste a descrição da vaga ou preencha empresa, vaga e **Sobre a empresa e os produtos** (por exemplo: “faz produtos de IA generativa e uma plataforma de GPUs”). Salve. O perfil fica em `~/.local/share/interviewai/profile.json` (Linux) ou `%APPDATA%\InterviewAI\profile.json` (Windows) e persiste entre execuções.
-4. Confira a captura nos medidores de áudio. No modo automático, as falas consolidadas do PC geram sugestões; use **Diga isso** em uma fala da transcrição ou Ctrl+D para solicitar uma manualmente.
+4. Confira a captura nos medidores de áudio. No modo automático, as falas do PC geram sugestões (com Antigravity ou API key, já durante a fala); use **Diga isso** em uma fala da transcrição ou Ctrl+D para solicitar uma manualmente.
 5. Para enviar uma mensagem de voz ao agente, use o microfone ou segure **Espaço** com o app em foco.
 
 A importação usa o provedor selecionado e só altera o rascunho: nada é salvo até você clicar em **Salvar**. O `contexto.md` é local e está no `.gitignore`; não acompanha o clone. Em **Extras**, importar o arquivo acrescenta o texto às notas do perfil.

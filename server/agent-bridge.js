@@ -10,6 +10,9 @@ export { runCodexAgent, closeCodexSession } from './codex-session.js';
 export { runClaudeAgent, closeClaudeSession } from './claude-session.js';
 
 let warmAgySession = null;
+// Started processes waiting for a one-shot turn (see takeAgySession).
+const AGY_POOL_SIZE = 2;
+let agyPool = [];
 
 function disposeAgySession(session) {
   if (!session || session.disposed) return;
@@ -25,6 +28,8 @@ function disposeAgySession(session) {
 
 export function closeAgySession() {
   disposeAgySession(warmAgySession);
+  for (const session of agyPool) disposeAgySession(session);
+  agyPool = [];
 }
 
 // A cancelled or failed turn takes its CLI process with it. Starting the
@@ -42,12 +47,16 @@ process.on('exit', closeCodexSession);
 process.on('exit', closeClaudeSession);
 process.on('exit', closeOpencodeSession);
 
+function agySessionKey({ model = 'gemini-3.8-flash', reasoningEffort = 'high', cwd = process.cwd() }) {
+  return JSON.stringify([resolveCliBin('agy'), cwd, model, reasoningEffort]);
+}
+
 /** Start the CLI without submitting a model turn. */
 // An isolated session serves a single turn and never replaces the warm session.
 function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEffort = 'high', cwd = process.cwd(), isolated = false }, reusePrepared = false) {
   const agyBin = resolveCliBin('agy');
 
-  const key = JSON.stringify([agyBin, cwd, model, reasoningEffort]);
+  const key = agySessionKey({ model, reasoningEffort, cwd });
   let session = warmAgySession;
   if (isolated || !session || session.disposed || session.active || session.key !== key
     || (conversationId ? session.conversationId !== conversationId : !(reusePrepared || session.prepared))) {
@@ -86,6 +95,7 @@ function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEf
       const id = data.conversation_id || data.step_update?.conversation_id || data.result?.conversation_id;
       if (id) current.conversationId = id;
       if (data.event === 'init') {
+        current.started = true;
         clearTimeout(current.readyTimer);
         current.resolveReady({ pid: child.pid, conversationId: current.conversationId });
       }
@@ -128,6 +138,29 @@ function getAgySession({ conversationId, model = 'gemini-3.8-flash', reasoningEf
   return session;
 }
 
+function fillAgyPool(options) {
+  const key = agySessionKey(options);
+  agyPool = agyPool.filter((session) => {
+    if (session.disposed) return false;
+    if (session.key === key) return true;
+    disposeAgySession(session);
+    return false;
+  });
+  while (agyPool.length < AGY_POOL_SIZE) agyPool.push(getAgySession({ ...options, conversationId: null, isolated: true }));
+}
+
+// A one-shot turn runs outside the conversation in an already started process, so
+// cancelling an outdated answer costs that process instead of a cold start (about
+// 4 s) before the next answer can begin.
+function takeAgySession(options) {
+  const key = agySessionKey(options);
+  const usable = agyPool.filter((session) => !session.disposed && session.key === key);
+  const session = usable.find((candidate) => candidate.started) || usable[0];
+  if (session) agyPool = agyPool.filter((candidate) => candidate !== session);
+  setImmediate(() => { try { fillAgyPool(options); } catch {} });
+  return session || getAgySession({ ...options, conversationId: null, isolated: true });
+}
+
 export function prepareAgySession(options = {}) {
   try { return getAgySession(options, true).ready; }
   catch (error) { return Promise.reject(error); }
@@ -138,14 +171,14 @@ export function runAgyAgent({ onMessage, onError, onClose, prompt, images, ...op
   try {
     // The Antigravity stream accepts only text blocks, so the agent opens image files itself.
     prompt = promptWithImageFiles(prompt, writeImageFiles(normalizeImages(images)));
-    session = getAgySession(options);
+    session = options.oneShot ? takeAgySession(options) : getAgySession(options);
   }
   catch (error) {
     queueMicrotask(() => onError?.(error));
     return { kill() {} };
   }
   session.prepared = false;
-  if (options.isolated) {
+  if (session.isolated) {
     const close = onClose;
     onClose = (code) => { disposeAgySession(session); close?.(code); };
   }
@@ -169,6 +202,18 @@ export function prepareAgentSession(options) {
   if (options.provider === 'opencode') return prepareOpencodeSession(options);
   if (isApiProvider(options.provider)) return prepareApiSession(options);
   return prepareAgySession(options);
+}
+
+// Copilot answers that run as one-shot turns: no conversation to keep, and a
+// cancelled answer leaves no cold start behind (warm Antigravity pool, HTTP APIs).
+export function runsOneShot(provider) {
+  return provider === 'antigravity' || isApiProvider(provider);
+}
+
+/** Starts the processes one-shot turns will use, without sending a prompt. */
+export function prepareOneShotSessions(options) {
+  if (options.provider !== 'antigravity') return;
+  try { fillAgyPool(options); } catch {}
 }
 
 export function closeAgentSession(provider) {
@@ -226,7 +271,7 @@ export function runIsolatedAgent({ timeoutMs = 120000, onText, signal, ...option
  */
 export function runUnifiedAgent(options) {
   if (options.provider === 'opencode') return runOpencodeAgent(options);
-  if (isApiProvider(options.provider)) return runApiAgent(options);
+  if (isApiProvider(options.provider)) return runApiAgent({ ...options, isolated: options.isolated || !!options.oneShot });
   if (options.provider === 'codex') {
     return runCodexAgent(options);
   }

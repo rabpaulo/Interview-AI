@@ -146,3 +146,79 @@ test('a burst of new utterances never restarts the active warm model', (t) => {
   t.mock.timers.tick(0);
   assert.equal(jobs[1].utteranceId, 'b6');
 });
+
+test('with speculation a growing partial replaces its preview and the matching final keeps it', (t) => {
+  const { live, jobs, finalized } = harness(t, { speculate: () => true });
+  live.partial('Como resolver', 'a');
+  t.mock.timers.tick(0);
+  assert.equal(jobs.length, 0, 'too few words for a preview');
+  live.partial('Como resolver isso em produção', 'a');
+  t.mock.timers.tick(0);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].isPreview(), true);
+  live.partial('Como resolver isso em produção sem perder dados?', 'a');
+  t.mock.timers.tick(0);
+  assert.equal(jobs[0].cancelled, true, 'the outdated preview stops at once');
+  assert.equal(jobs.length, 2);
+  assert.equal(jobs[1].text, 'Como resolver isso em produção sem perder dados?');
+  live.final('Como resolver isso em produção sem perder dados?', 'a');
+  t.mock.timers.tick(0);
+  assert.equal(jobs.length, 2, 'the final matches the running preview');
+  assert.equal(jobs[1].cancelled, false);
+  assert.equal(jobs[1].isPreview(), false);
+  jobs[1].onSettled();
+  t.mock.timers.tick(5000);
+  assert.equal(jobs.length, 2);
+  assert.deepEqual(finalized, ['a']);
+});
+
+test('with speculation a final that differs from the preview restarts the answer', (t) => {
+  const { live, jobs } = harness(t, { speculate: () => true });
+  live.partial('Como resolver isso em produção', 'a');
+  t.mock.timers.tick(0);
+  live.final('Como resolver isso em produção sem perder dados?', 'a');
+  t.mock.timers.tick(0);
+  assert.equal(jobs[0].cancelled, true);
+  assert.equal(jobs[1].text, 'Como resolver isso em produção sem perder dados?');
+  assert.equal(jobs[1].isPreview(), false);
+});
+
+test('a completed preview becomes the answer when the final text matches', (t) => {
+  const { live, jobs, finalized } = harness(t, { speculate: () => true });
+  live.partial('Qual seria sua abordagem aqui?', 'a');
+  t.mock.timers.tick(0);
+  jobs[0].onSettled();
+  live.final('Qual seria sua abordagem aqui?', 'a');
+  t.mock.timers.tick(5000);
+  assert.equal(jobs.length, 1);
+  assert.deepEqual(finalized, ['a']);
+});
+
+test('a complete answer is never replaced by a preview of the next utterance', (t) => {
+  const { live, jobs } = harness(t, { speculate: () => true });
+  live.final('Como você lidaria com um incidente em produção?', 'a');
+  t.mock.timers.tick(0);
+  live.partial('E se o banco de dados estivesse lento', 'b');
+  t.mock.timers.tick(0);
+  assert.equal(jobs[0].cancelled, false);
+  assert.equal(jobs.length, 1);
+  jobs[0].onSettled();
+  t.mock.timers.tick(0);
+  assert.equal(jobs[1].utteranceId, 'b');
+  assert.equal(jobs[1].isPreview(), true);
+});
+
+test('a preview leaves an earlier complete question pending', (t) => {
+  let ready = false;
+  const { live, jobs, discarded } = harness(t, { speculate: () => true, canStart: () => ready });
+  live.final('Como você lidaria com um incidente em produção?', 'a');
+  live.partial('E se o banco de dados estivesse lento', 'b');
+  ready = true;
+  t.mock.timers.tick(500);
+  assert.equal(jobs[0].utteranceId, 'b');
+  assert.deepEqual(discarded, []);
+  live.final('E se o banco de dados estivesse lento demais?', 'b');
+  t.mock.timers.tick(0);
+  assert.equal(jobs[1].utteranceId, 'b');
+  assert.deepEqual(discarded, ['a']);
+});

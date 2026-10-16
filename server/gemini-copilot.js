@@ -161,6 +161,7 @@ export function generateCopilotResponse({
   reasoningEffort = 'medium',
   fastMode = true,
   conversationId = null,
+  oneShot = false,
   isPreview = false,
   candidateContext = '',
   recentTurns = [],
@@ -183,6 +184,7 @@ export function generateCopilotResponse({
     reasoningEffort,
     fastMode,
     conversationId,
+    oneShot,
     cwd,
     onMessage: (eventData) => {
       // Capture conversation id

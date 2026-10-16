@@ -60,7 +60,9 @@ test(`backend preserves complete PC speech in ${automatic ? 'automatic' : 'manua
         socket.send(JSON.stringify({ type: 'trigger_copilot', text: 'E como eu verificaria isso?' }));
       }
       if (event.type === 'copilot_error' || event.type === 'pc_speech_error') reject(new Error(event.error));
-      if (event.type === 'copilot_completed') resolve(event);
+      // Automatic mode answers the speech so far; the matching final turns that preview into the answer.
+      if (automatic && event.type === 'copilot_finalized') resolve(events.findLast((item) => item.type === 'copilot_completed'));
+      if (!automatic && event.type === 'copilot_completed') resolve(event);
     });
   });
   assert.equal(events.some((event) => event.type === 'pc_speech_start'), true);
@@ -68,9 +70,11 @@ test(`backend preserves complete PC speech in ${automatic ? 'automatic' : 'manua
   assert.equal(events.some((event) => event.type === 'pc_speech_end'), true);
   const started = events.findIndex((event) => event.type === 'copilot_started');
   const transcribed = events.findIndex((event) => event.type === 'pc_speech_transcribed');
-  assert.ok(transcribed >= 0 && started > transcribed, 'the complete transcript must precede inference');
-  assert.equal(events.filter((event) => event.type === 'copilot_started').length, 1);
-  assert.equal(response.isPreview, false);
+  assert.ok(transcribed >= 0 && started >= 0);
+  if (automatic) assert.ok(started < transcribed, 'a preview starts while the interlocutor is still speaking');
+  else assert.ok(started > transcribed, 'manual mode waits for the complete transcript');
+  assert.equal(events.filter((event) => event.type === 'copilot_started').length, 1, 'the matching final reuses the preview');
+  assert.equal(response.isPreview, automatic, 'the preview completed before the final transcript');
   assert.match(response.replyId, automatic ? /^copilot-pc-/ : /^copilot-/);
   assert.ok(response.response);
   assert.ok(response.response.includes('Experiência real de suporte ao cliente.'), 'automatic responses must receive candidate context');
