@@ -16,6 +16,8 @@ import { useCandidateProfile } from './hooks/useCandidateProfile.js';
 import { useNotesVault } from './hooks/useNotesVault.js';
 import { useTextZoom } from './hooks/useTextZoom.js';
 import { AUTO_LANGUAGE } from '../shared/language.js';
+import { availableSelection, unavailableReason } from '../shared/provider-availability.js';
+import { PROVIDERS } from './config/models.js';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('transcription'); // transcription | session | summary
@@ -62,6 +64,10 @@ export default function App() {
     resetSession,
     syncSettings,
     syncLanguage,
+    providerAvailability,
+    refreshProviders,
+    agentNotice,
+    clearAgentNotice,
     pcDetectedLanguage,
 
     pcAudioLevel,
@@ -79,6 +85,21 @@ export default function App() {
     stopPcCapture,
     triggerCopilot,
   } = useAgentSocket();
+
+  // A provider or model the account cannot use is replaced by the first usable one.
+  const selectionReason = unavailableReason(providerAvailability, agentSettings.provider,
+    agentSettings.currentModelId, agentSettings.currentModel?.name);
+  const selectionFallback = selectionReason
+    ? availableSelection(providerAvailability, PROVIDERS, agentSettings.provider, agentSettings.currentModelId)
+    : null;
+  useEffect(() => {
+    if (!selectionFallback) return;
+    if (selectionFallback.provider !== agentSettings.provider) agentSettings.setProvider(selectionFallback.provider);
+    agentSettings.setModel(selectionFallback.model, selectionFallback.provider);
+    setSessionToast(`${selectionReason} Usando ${PROVIDERS[selectionFallback.provider].name} · ${selectionFallback.modelName}.`);
+  }, [selectionFallback?.provider, selectionFallback?.model]);
+  // With nothing usable, the selection stays and this banner explains why.
+  const availabilityAlert = agentNotice || (selectionReason && !selectionFallback ? selectionReason : null);
 
   // Sincroniza configurações do modelo com o servidor em tempo real
   useEffect(() => {
@@ -331,6 +352,30 @@ export default function App() {
           </div>
         )}
 
+        {availabilityAlert && (
+          <div role="alert" className="bg-rose-500/10 border-b border-rose-500/20 px-3 py-2 flex items-start justify-between gap-2 text-[11px] text-rose-300">
+            <div className="flex items-start gap-1.5">
+              <AlertCircle size={13} className="shrink-0 mt-0.5" />
+              <span>
+                {availabilityAlert}{' '}
+                <button type="button" onClick={() => setIsModelModalOpen(true)} className="underline font-semibold hover:text-white cursor-pointer">
+                  Escolher outro modelo
+                </button>
+              </span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button type="button" onClick={refreshProviders} aria-label="Verificar provedores novamente" title="Verificar novamente" className="p-0.5 hover:bg-rose-500/20 rounded cursor-pointer">
+                <RefreshCw size={12} />
+              </button>
+              {agentNotice && (
+                <button type="button" onClick={clearAgentNotice} aria-label="Fechar aviso do provedor" className="p-0.5 hover:bg-rose-500/20 rounded cursor-pointer">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Mic Permission / Error Banner */}
         {pcAudioError && (
           <div role="alert" className="bg-rose-500/10 border-b border-rose-500/20 px-3 py-2 flex items-start justify-between gap-2 text-[11px] text-rose-300">
@@ -455,6 +500,8 @@ export default function App() {
         fastMode={agentSettings.fastMode}
         setFastMode={agentSettings.setFastMode}
         toggleFastMode={agentSettings.toggleFastMode}
+        availability={providerAvailability}
+        onRefreshAvailability={refreshProviders}
       />
 
       {isContextOpen && (

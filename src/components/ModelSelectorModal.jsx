@@ -1,6 +1,7 @@
 import React from 'react';
-import { X, Sparkles, Bot, Asterisk, Zap, Check } from 'lucide-react';
+import { X, Sparkles, Bot, Asterisk, Zap, Check, RefreshCw } from 'lucide-react';
 import { PROVIDERS } from '../config/models.js';
+import { unavailableReason } from '../../shared/provider-availability.js';
 
 const ACCENTS = {
   antigravity: { selected: 'border-cyan-500/50 bg-cyan-950/20 text-white', radio: 'border-cyan-400 bg-cyan-500 text-black' },
@@ -40,8 +41,12 @@ export function ModelSelectorModal({
   setReasoningEffort,
   fastMode,
   toggleFastMode,
+  availability = {},
+  onRefreshAvailability,
 }) {
   if (!isOpen) return null;
+
+  const checking = Object.values(availability).some((entry) => entry?.status === 'checking');
 
   const currentProviderConfig = PROVIDERS[provider];
   const activeModelId = models[provider] || currentProviderConfig.defaultModel;
@@ -74,34 +79,66 @@ export function ModelSelectorModal({
         <div className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar">
           {/* Provider */}
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3 block">
-              Provedor
-            </label>
+            <div className="flex items-center justify-between mb-3">
+              <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+                Provedor
+              </label>
+              {onRefreshAvailability && (
+                <button
+                  type="button"
+                  onClick={onRefreshAvailability}
+                  disabled={checking}
+                  className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white disabled:opacity-50 disabled:cursor-default cursor-pointer"
+                >
+                  <RefreshCw size={11} className={checking ? 'animate-spin' : ''} />
+                  {checking ? 'Verificando…' : 'Verificar novamente'}
+                </button>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {PROVIDER_OPTIONS.map(({ id, Icon, active, iconClass }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setProvider(id)}
-                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer relative overflow-hidden flex items-center gap-2.5 ${
-                    provider === id
-                      ? active
-                      : 'border-zinc-800/80 bg-zinc-900/40 hover:bg-zinc-850 hover:border-zinc-700'
-                  }`}
-                >
-                  <div className={`w-8 h-8 rounded-xl border flex items-center justify-center ${iconClass}`}>
-                    <Icon size={16} />
-                  </div>
-                  <h3 className="text-sm font-bold text-white">{PROVIDERS[id].name}</h3>
-                  {provider === id && (
-                    <span className="ml-auto w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-white">
-                      <Check size={12} strokeWidth={3} />
-                    </span>
-                  )}
-                </button>
-              ))}
+              {PROVIDER_OPTIONS.map(({ id, Icon, active, iconClass }) => {
+                const reason = unavailableReason(availability, id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setProvider(id)}
+                    disabled={Boolean(reason)}
+                    title={reason || undefined}
+                    className={`p-3 rounded-2xl border text-left transition-all relative overflow-hidden flex items-center gap-2.5 ${
+                      reason
+                        ? 'border-zinc-800/60 bg-zinc-900/20 opacity-50 cursor-not-allowed'
+                        : provider === id
+                          ? `${active} cursor-pointer`
+                          : 'border-zinc-800/80 bg-zinc-900/40 hover:bg-zinc-850 hover:border-zinc-700 cursor-pointer'
+                    }`}
+                  >
+                    <div className={`w-8 h-8 shrink-0 rounded-xl border flex items-center justify-center ${iconClass}`}>
+                      <Icon size={16} />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-white">{PROVIDERS[id].name}</h3>
+                      {reason && <p className="text-[10px] text-rose-300 truncate">Indisponível</p>}
+                      {availability[id]?.status === 'checking' && <p className="text-[10px] text-zinc-500">Verificando…</p>}
+                    </div>
+                    {provider === id && !reason && (
+                      <span className="ml-auto w-5 h-5 shrink-0 rounded-full bg-blue-500 flex items-center justify-center text-white">
+                        <Check size={12} strokeWidth={3} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
+            {PROVIDER_OPTIONS.map(({ id }) => {
+              const reason = unavailableReason(availability, id);
+              return reason ? (
+                <p key={id} className="mt-2 text-[11px] text-rose-300/90">
+                  <span className="font-semibold">{PROVIDERS[id].name}:</span> {reason}
+                </p>
+              ) : null;
+            })}
           </div>
 
           {/* Model */}
@@ -112,15 +149,20 @@ export function ModelSelectorModal({
 
             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
               {currentProviderConfig.models.map((mod) => {
-                const isSelected = mod.id === activeModelId;
+                const reason = unavailableReason(availability, provider, mod.id, mod.name);
+                const isSelected = mod.id === activeModelId && !reason;
                 return (
                   <div
                     key={mod.id}
-                    onClick={() => setModel(mod.id, provider)}
-                    className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition ${
-                      isSelected
-                        ? accent.selected
-                        : 'border-zinc-800/80 bg-zinc-900/30 hover:bg-zinc-900/70 text-zinc-300'
+                    onClick={reason ? undefined : () => setModel(mod.id, provider)}
+                    aria-disabled={Boolean(reason)}
+                    title={reason || undefined}
+                    className={`p-3 rounded-xl border flex items-center gap-3 transition ${
+                      reason
+                        ? 'border-zinc-800/50 bg-zinc-900/10 text-zinc-500 opacity-60 cursor-not-allowed'
+                        : isSelected
+                          ? `${accent.selected} cursor-pointer`
+                          : 'border-zinc-800/80 bg-zinc-900/30 hover:bg-zinc-900/70 text-zinc-300 cursor-pointer'
                     }`}
                   >
                     <div
@@ -131,6 +173,7 @@ export function ModelSelectorModal({
                       {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-current" />}
                     </div>
                     <span className="font-semibold text-xs sm:text-sm">{mod.name}</span>
+                    {reason && <span className="ml-auto text-[10px] text-zinc-500">Indisponível na sua conta</span>}
                   </div>
                 );
               })}

@@ -1,0 +1,152 @@
+import readline from 'node:readline';
+import { agentWorkspace, cliAvailable, killProcessTree, resolveCliBin, spawnCli } from './cli-process.js';
+
+// Each check asks the CLI about the login and the account's models without sending
+// a prompt, so it uses no model quota.
+const CHECK_TIMEOUT_MS = 20000;
+// Failed turns ask for a recheck; this keeps a burst of errors from spawning one each.
+const RECHECK_INTERVAL_MS = 15000;
+
+const NAMES = { antigravity: 'Antigravity', codex: 'Codex', claude: 'Claude Code' };
+const BINS = { antigravity: 'agy', codex: 'codex', claude: 'claude' };
+
+const unavailable = (reason) => ({ status: 'unavailable', reason });
+const firstLine = (text) => text.split('\n').map((line) => line.trim()).find(Boolean)?.slice(0, 200) || '';
+
+function run(bin, args, env = process.env) {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let child;
+    try {
+      child = spawnCli(bin, args, { cwd: agentWorkspace(), stdio: ['ignore', 'pipe', 'pipe'], env });
+    } catch (error) {
+      resolve({ code: -1, stdout, stderr: error.message });
+      return;
+    }
+    const timer = setTimeout(() => {
+      killProcessTree(child);
+      resolve({ code: -1, stdout, stderr, timedOut: true });
+    }, CHECK_TIMEOUT_MS);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (error) => { clearTimeout(timer); resolve({ code: -1, stdout, stderr: error.message }); });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+  });
+}
+
+async function checkAntigravity(bin) {
+  const { code, stdout, stderr, timedOut } = await run(bin, ['models']);
+  if (timedOut) return unavailable('O Antigravity não respondeu ao listar os modelos.');
+  // Lines are "<id>\t<display name>"; progress messages have no tab.
+  const models = stdout.split('\n').filter((line) => line.includes('\t')).map((line) => line.split('\t')[0].trim()).filter(Boolean);
+  if (code !== 0 || !models.length) {
+    const detail = firstLine(stderr) || firstLine(stdout);
+    return unavailable(`Antigravity indisponível${detail ? `: ${detail}` : ''}. Confira o login no agy.`);
+  }
+  return { status: 'available', models };
+}
+
+async function checkCodex(bin) {
+  const child = spawnCli(bin, ['app-server', '--listen', 'stdio://',
+    '-c', 'forced_login_method="chatgpt"', '-c', 'model_provider="openai"'], {
+    cwd: agentWorkspace(), stdio: ['pipe', 'pipe', 'ignore'],
+  });
+  const pending = new Map();
+  let nextId = 0;
+  const failAll = (error) => {
+    for (const { reject } of pending.values()) reject(error);
+    pending.clear();
+  };
+  child.on('error', failAll);
+  child.on('close', () => failAll(new Error('O Codex encerrou durante a verificação.')));
+  child.stdin.on('error', failAll);
+  const reader = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+  reader.on('line', (line) => {
+    let message;
+    try { message = JSON.parse(line); } catch { return; }
+    const request = message.id !== undefined && !message.method && pending.get(message.id);
+    if (!request) return;
+    pending.delete(message.id);
+    if (message.error) request.reject(new Error(message.error.message || 'Erro no Codex'));
+    else request.resolve(message.result);
+  });
+  const rpc = (method, params) => new Promise((resolve, reject) => {
+    const id = ++nextId;
+    pending.set(id, { resolve, reject });
+    child.stdin.write(JSON.stringify({ id, method, params }) + '\n');
+  });
+  const timer = setTimeout(() => failAll(new Error('O Codex não respondeu à verificação.')), CHECK_TIMEOUT_MS);
+  try {
+    await rpc('initialize', { clientInfo: { name: 'interviewai', title: 'InterviewAI', version: '1.0.0' } });
+    child.stdin.write(JSON.stringify({ method: 'initialized', params: {} }) + '\n');
+    const { account } = await rpc('account/read', {});
+    if (!account) return unavailable('Faça login no Codex com "codex login" para usar este provedor.');
+    const models = [];
+    let cursor = null;
+    do {
+      const page = await rpc('model/list', { includeHidden: true, cursor });
+      models.push(...(page.data || []).map((model) => model.id));
+      cursor = page.nextCursor;
+    } while (cursor && models.length < 500);
+    return { status: 'available', models };
+  } catch (error) {
+    return unavailable(`Codex indisponível: ${error.message}`);
+  } finally {
+    clearTimeout(timer);
+    reader.close();
+    killProcessTree(child);
+  }
+}
+
+async function checkClaude(bin) {
+  // Same environment as the sessions, which drop API keys to use the subscription login.
+  const { ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ...env } = process.env;
+  const { stdout, stderr, timedOut } = await run(bin, ['auth', 'status'], env);
+  if (timedOut) return unavailable('O Claude Code não respondeu à verificação de login.');
+  let status = null;
+  try { status = JSON.parse(stdout); } catch {}
+  if (status?.loggedIn) return { status: 'available', models: null };
+  if (status) return unavailable('Faça login no Claude Code com "claude auth login" para usar este provedor.');
+  const detail = firstLine(stderr) || firstLine(stdout);
+  return unavailable(`Claude Code indisponível${detail ? `: ${detail}` : ''}.`);
+}
+
+const CHECKS = { antigravity: checkAntigravity, codex: checkCodex, claude: checkClaude };
+
+async function checkProvider(provider) {
+  const bin = resolveCliBin(BINS[provider]);
+  if (!cliAvailable(bin)) {
+    return unavailable(`${NAMES[provider]} não está instalado (comando "${BINS[provider]}" não encontrado).`);
+  }
+  try { return await CHECKS[provider](bin); }
+  catch (error) { return unavailable(`${NAMES[provider]} indisponível: ${error.message}`); }
+}
+
+export function createProviderAvailability({ onChange = () => {}, check = checkProvider } = {}) {
+  const state = Object.fromEntries(Object.keys(CHECKS).map((provider) => [provider, { status: 'checking' }]));
+  const running = new Map();
+  const checkedAt = new Map();
+
+  function refresh(provider, { force = false } = {}) {
+    if (!provider) return Promise.all(Object.keys(CHECKS).map((name) => refresh(name, { force })));
+    if (running.has(provider)) return running.get(provider);
+    if (!force && Date.now() - (checkedAt.get(provider) || 0) < RECHECK_INTERVAL_MS) return Promise.resolve(state[provider]);
+    const job = check(provider).then((result) => {
+      running.delete(provider);
+      checkedAt.set(provider, Date.now());
+      state[provider] = result;
+      if (result.status === 'unavailable') console.warn(`[Providers] ${provider}: ${result.reason}`);
+      onChange(snapshot(), provider);
+      return result;
+    });
+    running.set(provider, job);
+    return job;
+  }
+
+  function snapshot() {
+    return Object.fromEntries(Object.entries(state).map(([name, entry]) => [name, { ...entry }]));
+  }
+
+  return { refresh, state: snapshot };
+}

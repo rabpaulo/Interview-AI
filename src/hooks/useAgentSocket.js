@@ -40,6 +40,10 @@ export function useAgentSocket() {
   const [autoRespond, setAutoRespond] = useState(true);
   const [availableModels, setAvailableModels] = useState([]);
   const [availableSinks, setAvailableSinks] = useState([]);
+  // Login and account models per provider, checked by the backend.
+  const [providerAvailability, setProviderAvailability] = useState({});
+  // Why the backend refused to start the selected provider or model.
+  const [agentNotice, setAgentNotice] = useState(null);
   const [lastPcTranscript, setLastPcTranscript] = useState('');
   const [pcDetectedLanguage, setPcDetectedLanguage] = useState(null);
   const languageRef = useRef(null);
@@ -138,11 +142,21 @@ export function useAgentSocket() {
         if (event.autoRespond !== undefined) setAutoRespond(event.autoRespond);
         if (event.availableModels) setAvailableModels(event.availableModels);
         if (event.availableSinks) setAvailableSinks(event.availableSinks?.sinks || []);
+        if (event.providerAvailability) setProviderAvailability(event.providerAvailability);
         if (event.pcAudioStatus?.isCapturing !== undefined) setIsPcCapturing(event.pcAudioStatus.isCapturing);
         if (event.pcAudioStatus?.source) setPcCaptureSource(event.pcAudioStatus.source);
         break;
 
+      case 'provider_availability':
+        if (event.availability) setProviderAvailability(event.availability);
+        break;
+
+      case 'agent_unavailable':
+        setAgentNotice(event.error || null);
+        break;
+
       case 'agent_session':
+        setAgentNotice(event.status === 'unavailable' ? event.error || null : null);
         if (event.status === 'ready' && event.conversationId && event.provider) {
           setConversationIds((prev) => ({ ...prev, [event.provider]: event.conversationId }));
         }
@@ -683,6 +697,13 @@ export function useAgentSocket() {
     }
   }, []);
 
+  const refreshProviders = useCallback(() => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'refresh_providers' }));
+    }
+  }, []);
+  const clearAgentNotice = useCallback(() => setAgentNotice(null), []);
+
   const resetSession = useCallback((provider = null) => {
     setMessages([]);
     setCurrentThought('');
@@ -845,6 +866,10 @@ export function useAgentSocket() {
     clearMessages: resetSession,
     syncSettings,
     syncLanguage,
+    providerAvailability,
+    refreshProviders,
+    agentNotice,
+    clearAgentNotice,
 
     // PC Loopback Audio & Copilot
     pcAudioLevel,

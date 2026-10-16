@@ -21,6 +21,8 @@ import { buildAgentPrompt } from './agent-prompt.js';
 import { normalizeImages, imageDataUrl, SCREENSHOT_PROMPT } from './agent-images.js';
 import { AVAILABLE_MODELS, AVAILABLE_PERSONAS, generateCopilotResponse } from './gemini-copilot.js';
 import { AUTO_LANGUAGE, LANGUAGES } from '../shared/language.js';
+import { unavailableReason } from '../shared/provider-availability.js';
+import { createProviderAvailability } from './provider-availability.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -106,17 +108,45 @@ function broadcast(data) {
   });
 }
 
+// Login and account models of each CLI. An unavailable provider or model is never
+// started; the client receives the reason and offers only usable options.
+const providerAvailability = createProviderAvailability({
+  onChange: (availability, provider) => {
+    broadcast({ type: 'provider_availability', availability });
+    if (provider !== selectedProvider || activeAgentProcess) return;
+    const blocked = blockedReason(selectedProvider, selectedModel);
+    if (blocked || agentSession.status === 'unavailable') {
+      preparationKey = null;
+      prepareSelectedSession();
+    }
+  },
+});
+
+function blockedReason(provider, model) {
+  const name = AVAILABLE_MODELS.find((entry) => entry.id === model)?.name;
+  return unavailableReason(providerAvailability.state(), provider, model, name);
+}
+
 // Session preparation is independent of response generation and never sends a prompt.
 let preparationGeneration = 0;
 let preparationKey = null;
 let agentSession = { status: 'starting', provider: selectedProvider };
 function prepareSelectedSession() {
   if (activeAgentProcess) return;
+  const provider = selectedProvider;
+  const blocked = blockedReason(provider, selectedModel);
+  if (blocked) {
+    preparationKey = null;
+    preparationGeneration++;
+    closeAgentSession(provider);
+    agentSession = { status: 'unavailable', provider, error: blocked };
+    broadcast({ type: 'agent_session', ...agentSession });
+    return;
+  }
   const key = JSON.stringify([selectedProvider, selectedModel, selectedReasoningEffort, selectedFastMode]);
   if (preparationKey === key && agentSession.status !== 'error') return;
   preparationKey = key;
   const generation = ++preparationGeneration;
-  const provider = selectedProvider;
   agentSession = { status: 'starting', provider };
   broadcast({ type: 'agent_session', ...agentSession });
   prepareAgentSession({ provider, model: selectedModel, reasoningEffort: selectedReasoningEffort,
@@ -131,6 +161,8 @@ function prepareSelectedSession() {
       agentSession = { status: 'error', provider, error: error.message };
       broadcast({ type: 'agent_session', ...agentSession });
       console.warn(`[Session] ${provider}: ${error.message}`);
+      // A logout or a model removed from the account shows up as a failed start.
+      providerAvailability.refresh(provider);
     });
 }
 
@@ -255,6 +287,12 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
     persona,
     timestamp: Date.now(),
   });
+  const blocked = blockedReason(provider, model);
+  if (blocked) {
+    broadcast({ type: 'copilot_error', replyId, error: blocked, provider, model });
+    settle({ error: blocked });
+    return null;
+  }
 
   const processHandle = generateCopilotResponse({
     transcript,
@@ -282,6 +320,7 @@ function triggerCopilotForText(transcript, overrideOptions = {}) {
     },
     onError: (err) => {
       if (generation !== copilotGeneration || settled) return;
+      providerAvailability.refresh(provider);
       broadcast({ type: 'copilot_error', replyId, error: err.message, provider, model });
       activeAgentProcess = null;
       settle({ error: err.message });
@@ -340,6 +379,7 @@ app.get('/api/status', (req, res) => {
     selectedModel,
     activeConversationIds,
     agentSession,
+    providerAvailability: providerAvailability.state(),
     isProcessing: activeAgentProcess !== null,
   });
 });
@@ -537,6 +577,8 @@ app.post('/api/message', (req, res) => {
   if (!turn.request) {
     return res.status(400).json({ error: 'Mensagem vazia' });
   }
+  const blocked = blockedReason(provider, model || selectedModel);
+  if (blocked) return res.status(409).json({ error: blocked, provider, model });
 
   if (activeAgentProcess) {
     activeAgentProcess.kill();
@@ -602,6 +644,7 @@ wss.on('connection', (ws, req) => {
     JSON.stringify({
       type: 'connection_ack',
       agentSession,
+      providerAvailability: providerAvailability.state(),
       conversationIds: activeConversationIds,
       isProcessing: activeAgentProcess !== null,
       selectedProvider,
@@ -645,6 +688,11 @@ function handleClientMessage(ws, data) {
 
   if (type === 'reset_session') {
     resetAgentSession(data.provider);
+    return;
+  }
+
+  if (type === 'refresh_providers') {
+    providerAvailability.refresh(data.provider, { force: true });
     return;
   }
 
@@ -739,6 +787,11 @@ function handleClientMessage(ws, data) {
     const reasoningEffort = data.reasoningEffort || selectedReasoningEffort || 'medium';
     const fastMode = data.fastMode !== undefined ? data.fastMode : selectedFastMode;
     const currentConvId = activeConversationIds[provider] || null;
+    const blocked = blockedReason(provider, model);
+    if (blocked) {
+      ws.send(JSON.stringify({ type: 'agent_unavailable', error: blocked, provider, model }));
+      return;
+    }
 
     if (activeAgentProcess) {
       console.log('[WS] Aborting previous running process for new prompt...');
@@ -812,6 +865,7 @@ function handleClientMessage(ws, data) {
       },
       onError: (err) => {
         console.error('[Bridge Error]:', err);
+        providerAvailability.refresh(provider);
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify({
@@ -866,4 +920,5 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`[InterviewAI Server] Running on http://localhost:${PORT}`);
   console.log(`[InterviewAI Server] WebSocket ready on ws://localhost:${PORT}`);
   prepareSelectedSession();
+  providerAvailability.refresh();
 });

@@ -4,7 +4,9 @@
 
 Abra o app com `npm start`. No menu (☰) da barra inferior, selecione em **Modelo** o provedor, o modelo e o nível de raciocínio, e em **Modo** a persona adequada: conversa geral, entrevista técnica, arquitetura, comportamental, RH, perguntas ao entrevistador ou vendas.
 
-O app prepara a sessão do agente sem enviar uma pergunta. A disponibilidade dos modelos depende do CLI e da conta autenticada; o seletor contém uma lista definida no projeto.
+O app prepara a sessão do agente sem enviar uma pergunta. Ao abrir, o backend verifica cada provedor sem gastar cota: se o CLI está instalado e logado e, no Antigravity (`agy models`) e no Codex (`model/list`), quais modelos a conta oferece. O Claude Code informa só o login, então todos os modelos da lista ficam liberados quando ele está logado. No seletor, provedores e modelos indisponíveis aparecem desativados, com o motivo; **Verificar novamente** refaz a verificação, por exemplo depois de um login.
+
+Se o modelo salvo deixar de estar disponível, o app troca para o primeiro modelo utilizável, do mesmo provedor se houver, e avisa no topo da janela. Sem nenhuma opção utilizável, um aviso vermelho explica o motivo, e o backend recusa iniciar o agente, a sugestão automática e as mensagens diretas. Uma falha ao iniciar ou responder também dispara uma nova verificação daquele provedor. A lista do seletor continua definida no projeto: modelos novos da conta só aparecem depois de adicionados em `src/config/models.js`.
 
 ## Meu contexto
 
