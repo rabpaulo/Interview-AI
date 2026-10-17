@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { runUnifiedAgent, runIsolatedAgent, prepareAgentSession, closeAgentSession, prepareOneShotSessions, runsOneShot } from './agent-bridge.js';
 import { importDocument, ImportError, MAX_IMPORT_BYTES } from './document-import.js';
 import { systemAudioEngine, SystemAudioEngine } from './system-audio-engine.js';
-import { transcribeAudioBuffer } from './transcriber.js';
+import { transcribeAudioBuffer, warmTranscriber } from './transcriber.js';
 import { wirePcTranscription } from './pc-transcription.js';
 import { createLiveCopilot } from './live-copilot.js';
 import { readCandidateContext } from './candidate-context.js';
@@ -336,6 +336,8 @@ const pcTranscription = wirePcTranscription(systemAudioEngine, {
 });
 
 systemAudioEngine.on('status', (status) => {
+  // The recognizer process is ready before the first utterance.
+  if (status.isCapturing) warmTranscriber();
   broadcast({ type: 'pc_capture_status', ...status });
 });
 

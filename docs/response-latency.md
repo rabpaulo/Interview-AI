@@ -4,9 +4,9 @@ Este documento descreve o fluxo atual. Com Antigravity ou um provedor por API ke
 
 ## Da captura à resposta
 
-1. O PC envia a primeira janela de áudio ao reconhecimento após cerca de 2 segundos. As próximas janelas, assim como as do microfone, usam aproximadamente 3 segundos, com 800 ms de sobreposição.
+1. O PC envia o primeiro segundo de fala ao reconhecimento e, depois, o trecho aberto a cada segundo (veja "Transcrição do PC"). O microfone continua usando janelas de aproximadamente 3 segundos, com 800 ms de sobreposição.
 2. O texto parcial aparece na interface. Com Antigravity ou API key, um parcial com pelo menos 4 palavras inicia uma prévia no modo automático (veja "Prévias durante a fala").
-3. Após 300 ms de pausa, o reconhecimento do trecho pendente pode começar. A fala continua aberta até completar 900 ms de silêncio.
+3. Após 300 ms de pausa, o reconhecimento do trecho aberto começa. A fala continua aberta até completar 900 ms de silêncio.
 4. Se o áudio voltar antes disso, os trechos continuam na mesma fala. Caso contrário, o app consolida a transcrição após concluir os pedidos de reconhecimento pendentes.
 5. No modo automático, o agendador envia o texto consolidado ao copiloto, a menos que uma prévia já tenha respondido exatamente esse texto. O prompt inclui a persona, o contexto pessoal salvo e, se houver uma vault conectada, os trechos das notas encontrados para a fala.
 
@@ -16,9 +16,42 @@ O microfone finaliza ao soltar o push-to-talk ou parar a gravação e segue o fl
 
 Os 900 ms são um critério de silêncio, não uma garantia de pergunta completa. Uma pausa longa pode dividir o enunciado. Áudio sem pausas é dividido após 30 s (45 s, no máximo, se não houver um ponto mais baixo). O botão **Diga isso** usa a última transcrição consolidada, sem recompor automaticamente uma pergunta dividida em vários trechos.
 
+## Transcrição do PC
+
+O reconhecimento é o gratuito do Google, via `server/transcribe.py`, sem custo nem API key. Ele só aceita arquivos inteiros e demora mais quanto maior o áudio: medido em 16 de outubro de 2026, cerca de 0,5 s para 1 s de fala, 1,2 s para 4 s, 1,9 s para 8 s e 2,5 s para 13,5 s. Por isso a fala é tratada em trechos curtos (`shared/rolling-transcription.js`):
+
+- O trecho aberto da fala é reenviado a cada segundo, enquanto cresce. Cada resposta substitui o texto anterior desse trecho; uma resposta atrasada nunca substitui uma mais nova.
+- Quando o trecho passa de 3 s, ele é fechado numa pausa real, com 150 ms pelo menos 30 dB abaixo da fala, e enviado uma última vez inteiro. O texto desse trecho fica fixo, e o próximo trecho começa depois da pausa. Uma queda curta de volume costuma ser uma consoante, não uma pausa; cortar ali estraga a palavra dos dois lados. Sem pausa, o trecho cresce até 7 s e é cortado no ponto mais baixo.
+- Os trechos não se sobrepõem, então não é preciso juntar transcrições por palavras repetidas, que era a fonte de erros como "cons consistência" nas janelas de 3 s.
+- Após 300 ms de pausa, o trecho aberto é enviado com 300 ms do silêncio, para que a última sílaba baixa ("from it") não seja cortada. Se a fala não voltar, esse resultado vira a transcrição final.
+- Um único processo `transcribe.py --serve` atende todos os pedidos, em paralelo e identificados por id, sem iniciar o Python a cada trecho. Ele é iniciado junto com a captura.
+- Um trecho sem resposta não interrompe a fala, porque o próximo cobre o mesmo áudio. A fala só termina em erro se não houver texto nenhum. As transcrições finais saem na ordem em que as falas aconteceram.
+- No modo automático de idioma, o idioma é decidido com pelo menos 1,5 s de fala; o primeiro segundo ("Como") não basta.
+
+Os parciais chegam à tela a cada resposta. O copiloto recebe um parcial com 4 ou mais palavras no máximo a cada 2 s, exceto o parcial da pausa, enviado na hora. Cada parcial reinicia a prévia, e no Antigravity uma prévia cancelada custa um processo que leva cerca de 4 s para ser substituído.
+
+Gravações de teste (voz sintética do Google, uma fala de 13,5 s em português e outra de 6 s em inglês), reconhecimento real, mesmo áudio nas duas versões:
+
+| | Janelas de 3 s (antes) | Trechos de 1 s (agora) |
+| --- | ---: | ---: |
+| Primeiro parcial após o início da fala | 3,0 s | 1,5 a 1,7 s |
+| Intervalo entre parciais | 1,9 a 2,4 s | cerca de 1,2 s |
+| Final após o fim da fala, 6 s / 13,5 s | 1,9 s / 0,9 s | 1,0 a 1,1 s / 1,2 a 1,4 s |
+| Transcrição final | com erros de junção ("Camisaria", "sonhos", "cons consistência", frase repetida) | igual ao reconhecimento do áudio inteiro |
+
+A voz sintética tem menos pausas que a fala real; numa entrevista, os trechos tendem a ser fechados mais cedo. Cada segundo de fala gera cerca de um pedido ao serviço gratuito, contra um a cada 3 s antes. É um serviço não oficial; se ele passar a recusar pedidos, as falas terminam com erro de reconhecimento.
+
+Para medir com uma gravação (qualquer formato que o ffmpeg leia):
+
+```bash
+node scripts/measure-transcription-latency.js gravacao.wav auto
+```
+
+O script passa a gravação pela captura real (detecção de voz, trechos, processo do Python e reconhecimento do Google) em ritmo real e mostra cada parcial, a transcrição final e os tempos.
+
 ## Controle da espera
 
-A transcrição processa os blocos em ordem, com fila limitada. Quando um bloco curto não é reconhecido, o sistema tenta ampliar o áudio com trechos vizinhos, até 10 segundos de contexto. Isso pode recuperar palavras cortadas, mas também adiciona uma tentativa de reconhecimento.
+O microfone ainda usa janelas de 3 s, processadas em ordem e com fila limitada. Quando uma janela curta não é reconhecida, ela é ampliada com as vizinhas, até 10 s de contexto.
 
 O copiloto mantém uma geração automática por vez. Se o modelo ficar para trás, a fala completa mais recente substitui respostas antigas ainda pendentes. As transcrições permanecem no histórico; encher a fila não reinicia o agente ativo.
 
@@ -86,10 +119,10 @@ Um teste com relógio controlado e reconhecimento simulado de 400 ms verifica qu
 | Sintoma | O que verificar |
 | --- | --- |
 | Nenhuma transcrição do PC | Estado da captura, saída padrão de áudio, pactl e parec. |
-| Erro ou demora no reconhecimento | Python com SpeechRecognition, acesso à internet, volume e ruído do áudio. |
+| Erro ou demora no reconhecimento | Python com SpeechRecognition, acesso à internet, volume e ruído do áudio. Mensagens `[Transcriber]` no log do backend. |
 | Transcrição termina no meio da pergunta | Pausas de 900 ms ou falha de reconhecimento; compare o texto com o áudio ouvido. |
 | Texto pronto, mas resposta demora | Preparação do CLI, pedidos anteriores e tempo de geração do modelo. |
 | Resposta genérica ou sem fatos pessoais | Contexto salvo e persona selecionada; mensagens diretas não anexam o contexto do copiloto. |
 | Mudança de backend não aparece | Processo antigo reaproveitado na porta 3001; reinicie esse backend. |
 
-Os testes relevantes estão em `server/response-latency.test.js`, `server/live-copilot.test.js`, `server/pc-live-integration.test.js` e `shared/streaming-transcription.test.js`. Execute-os pela suíte `npm test` ou individualmente com `node --test`.
+Os testes relevantes estão em `server/response-latency.test.js`, `server/live-copilot.test.js`, `server/pc-live-integration.test.js`, `server/pc-speech.test.js`, `server/transcriber.test.js`, `shared/rolling-transcription.test.js` e `shared/streaming-transcription.test.js`. Execute-os pela suíte `npm test` ou individualmente com `node --test`.

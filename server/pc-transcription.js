@@ -1,39 +1,78 @@
-import { StreamingTranscription } from '../shared/streaming-transcription.js';
+import { RollingTranscription } from '../shared/rolling-transcription.js';
 import { createUtteranceLanguage } from '../shared/language.js';
+import { MIN_PREVIEW_WORDS } from './live-copilot.js';
 
-export function wirePcTranscription(engine, { transcribe, getLanguage, broadcast, onFinal, onPartial = () => {}, onCancel = () => {} }) {
+// Auto language detection needs a few words: a one-second tail ("Como") is not
+// allowed to lock the utterance to a language.
+const MIN_DETECTION_MS = 1500;
+const wordCount = (text) => text.split(/\s+/).filter(Boolean).length;
+
+// Partials reach the screen as they come (about every second), but the live
+// responder gets one that could start a preview at most every `copilotPartialMs`,
+// except at a pause: each one restarts the preview, and with Antigravity a
+// cancelled preview costs a process that takes about 4 s to replace.
+export function wirePcTranscription(engine, { transcribe, getLanguage, broadcast, onFinal, onPartial = () => {}, onCancel = () => {},
+  copilotPartialMs = 2000 }) {
   const sessions = new Map();
-  let requestTail = Promise.resolve();
   let lastLanguage = null;
+  // Requests run concurrently, so a short utterance can be recognized before the
+  // long one ahead of it; results are still announced in the order they were spoken.
+  let lastAnnounced = Promise.resolve();
 
   function sessionFor(chunk) {
     if (sessions.has(chunk.utteranceId)) return sessions.get(chunk.utteranceId);
     const language = createUtteranceLanguage(getLanguage(), lastLanguage);
-    const session = new StreamingTranscription({
-      transcribe: (wav, signal) => {
-        const request = requestTail.then(() => {
-          if (signal.aborted) throw new Error('Transcrição cancelada');
-          return transcribe(wav, language.request, { signal });
-        }).then((result) => language.observe(result));
-        requestTail = request.catch(() => {});
-        return request;
+    const previous = lastAnnounced;
+    let announced;
+    lastAnnounced = new Promise((resolve) => { announced = resolve; });
+    const inOrder = (announce) => previous.then(() => {
+      if (!session.cancelled || announce.always) announce();
+      announced();
+    });
+    let lastForward = -Infinity;
+    let forwardTimer = null;
+    let held = null;
+    const forward = (text, paced) => {
+      clearTimeout(forwardTimer);
+      forwardTimer = null;
+      held = null;
+      if (paced) lastForward = Date.now();
+      onPartial(text, chunk.utteranceId);
+    };
+    const session = new RollingTranscription({
+      // Requests run concurrently: the recognizer worker answers them in parallel.
+      transcribe: async (wav, signal, part) => {
+        const result = await transcribe(wav, language.request, { signal });
+        return part.final || part.kind === 'commit' || part.durationMs >= MIN_DETECTION_MS ? language.observe(result) : result;
       },
-      onPartial: (text) => {
+      onPartial: (text, part) => {
         broadcast({ type: 'pc_speech_partial', text, utteranceId: chunk.utteranceId, timestamp: Date.now() });
-        onPartial(text, chunk.utteranceId);
+        // Too short for a preview: only the notes lookup uses it.
+        if (wordCount(text) < MIN_PREVIEW_WORDS) return forward(text, false);
+        const wait = lastForward + copilotPartialMs - Date.now();
+        if (part.pause || wait <= 0) return forward(text, true);
+        held = text;
+        forwardTimer ||= setTimeout(() => forward(held, true), wait);
       },
-      onFinal: (text) => {
+      onFinal: (text) => inOrder(() => {
         if (language.detected) lastLanguage = language.detected;
         broadcast({ type: 'pc_speech_transcribed', text, language: language.detected, utteranceId: chunk.utteranceId, durationSec: session.durationSec, timestamp: Date.now() });
         onFinal(text, chunk.utteranceId);
-      },
+      }),
       onError: (error) => {
-        broadcast({ type: 'pc_speech_error', error, utteranceId: chunk.utteranceId });
-        onCancel(chunk.utteranceId);
         // Without this, a long utterance keeps feeding the failed session and
         // nothing more is transcribed until the PC audio goes quiet.
         engine.abandonSpeech?.(chunk.utteranceId);
+        inOrder(Object.assign(() => {
+          broadcast({ type: 'pc_speech_error', error, utteranceId: chunk.utteranceId });
+          onCancel(chunk.utteranceId);
+        }, { always: true }));
       },
+    });
+    session.done.then((result) => {
+      clearTimeout(forwardTimer);
+      // A cancelled utterance has nothing to announce; the next one need not wait.
+      if (result.cancelled) announced();
     });
     sessions.set(chunk.utteranceId, session);
     if (sessions.size > 4) {

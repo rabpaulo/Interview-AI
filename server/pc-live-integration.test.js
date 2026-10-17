@@ -17,7 +17,8 @@ test(`backend preserves complete PC speech in ${automatic ? 'automatic' : 'manua
   };
   fs.writeFileSync(path.join(dir, 'profile.json'), JSON.stringify({ version: 1, profile: { notes: 'Experiência real de suporte ao cliente.' } }));
   executable('pactl', "console.log(process.argv.includes('get-default-sink') ? 'test_sink' : '0\\ttest_sink\\ttest');");
-  executable('python3', "console.log(JSON.stringify({text: 'Como resolvo esse problema no servidor?'}));");
+  // Stands in for `transcribe.py --serve`: one JSON answer per request line.
+  executable('python3', "require('readline').createInterface({ input: process.stdin }).on('line', (line) => console.log(JSON.stringify({ id: JSON.parse(line).id, text: 'Como resolvo esse problema no servidor?' })));");
   executable('parec', "const pcm=Buffer.alloc(1600); for(let i=0;i<pcm.length;i+=2) pcm.writeInt16LE(4000,i); let frames=0; setInterval(()=>process.stdout.write(++frames<=60 ? pcm : Buffer.alloc(1600)),50);");
   const probe = net.createServer();
   await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));

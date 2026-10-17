@@ -1,6 +1,6 @@
 import { spawn, execSync } from 'child_process';
 import EventEmitter from 'events';
-import { PcmChunker } from '../shared/streaming-transcription.js';
+import { RollingAudio } from '../shared/rolling-transcription.js';
 
 const CHUNK_BYTES = 1600; // 50 ms of PCM16 mono at 16 kHz
 
@@ -20,7 +20,7 @@ export function defaultAudioSource(env = process.env, platform = process.platfor
  * Emits:
  * - 'level': { level: number (0-100), rms: number } (emitted ~30 times/sec)
  * - 'speech_start': { utteranceId, timestamp }
- * - 'speech_chunk': { utteranceId, wavBuffer, sequence } (while speaking)
+ * - 'speech_chunk': { utteranceId, kind: 'tail' | 'commit', segment, wavBuffer, sequence } (while speaking)
  * - 'speech_segment': { wavBuffer: Buffer, durationSec: number }
  * - 'status': { isCapturing: boolean, sink: string }
  * - 'error': (err)
@@ -310,7 +310,8 @@ export class SystemAudioEngine extends EventEmitter {
         const utteranceId = `${now}-${++this.nextSpeechId}`;
         this.utteranceId = utteranceId;
         this.speechTotalBytes = leadIn.length;
-        this.speechChunker = new PcmChunker((part) => {
+        // About once a second, the open ~3 s tail of the utterance is recognized again.
+        this.speechChunker = new RollingAudio((part) => {
           this.emit(part.final ? 'speech_segment' : 'speech_chunk', {
             ...part,
             wavBuffer: part.wavBuffer ? Buffer.from(part.wavBuffer) : null,
@@ -319,7 +320,7 @@ export class SystemAudioEngine extends EventEmitter {
               / (this.sampleRate * this.bytesPerSample),
             timestamp: Date.now(),
           });
-        }, { firstChunkMs: 2000 });
+        });
         this.speechChunker.push(leadIn, false);
         this.emit('speech_start', { utteranceId, timestamp: now });
         console.log(`[SystemAudio] 🎙️ Speech detected from PC (level: ${normalizedLevel}%)`);

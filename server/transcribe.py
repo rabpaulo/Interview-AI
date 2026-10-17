@@ -4,6 +4,7 @@ import os
 import json
 import re
 import subprocess
+import threading
 import wave
 from concurrent.futures import ThreadPoolExecutor
 import speech_recognition as sr
@@ -110,7 +111,38 @@ def transcribe_audio(input_file, language="pt-BR"):
             except:
                 pass
 
+def serve():
+    """One long-lived process for every request: no interpreter start-up per chunk.
+    Reads one JSON request per line ({"id", "file", "language"}) and answers each
+    with one JSON line carrying the same id. Requests run concurrently."""
+    lock = threading.Lock()
+
+    def answer(request):
+        try:
+            result = transcribe_audio(request["file"], request.get("language") or "pt-BR")
+        except Exception as e:
+            result = {"error": str(e)}
+        line = json.dumps({"id": request.get("id"), **result}, ensure_ascii=False)
+        with lock:
+            sys.stdout.write(line + "\n")
+            sys.stdout.flush()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                request = json.loads(line)
+            except ValueError:
+                continue
+            pool.submit(answer, request)
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--serve"]:
+        serve()
+        sys.exit(0)
     if len(sys.argv) < 2:
         print(json.dumps({"error": "Nenhum arquivo de áudio fornecido"}))
         sys.exit(1)

@@ -29,7 +29,7 @@ test('incomplete PC speech never starts an answer and the complete question star
   const transcription = wirePcTranscription(engine, {
     transcribe: async () => ({ text: ++calls === 1
       ? 'Como resolvo esse problema'
-      : 'esse problema no servidor sem perder os dados?' }),
+      : 'Como resolvo esse problema no servidor sem perder os dados?' }),
     getLanguage: () => 'pt-BR', broadcast() {},
     onPartial: live.partial, onFinal: live.final, onCancel: live.cancel,
   });

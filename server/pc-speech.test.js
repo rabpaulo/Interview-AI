@@ -71,19 +71,28 @@ test('PC speech exposes recognized partials to the live responder before any sil
   transcription.cancel();
 });
 
+// Each request covers the open segment, so a longer one hears more of the question.
+const bySeconds = (texts) => async (wav) => {
+  const seconds = (wav.length - 44) / 32000;
+  const reached = Object.keys(texts).map(Number).filter((limit) => seconds >= limit);
+  return texts[Math.max(...reached)] ?? { error: 'Não foi possível entender o áudio', code: 'unrecognized' };
+};
+
 test('PC starts recognition while speaking and only responds after the pause', async () => {
   let calls = 0;
-  const app = pipeline(async () => ({ text: ++calls === 1 ? 'Como resolvo esse problema' : 'esse problema no servidor?' }));
+  const recognize = bySeconds({ 1: { text: 'Como' }, 2: { text: 'Como resolvo esse problema' }, 4: { text: 'Como resolvo esse problema no servidor?' } });
+  const app = pipeline((wav) => { calls++; return recognize(wav); });
   for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
   await tick();
   assert.equal(app.engine.inSpeech, true);
-  assert.equal(calls, 1);
-  assert.equal(app.events.at(-1).type, 'pc_speech_partial');
+  assert.equal(calls, 3, 'one recognition per second of speech');
+  assert.deepEqual(app.events.filter((event) => event.type === 'pc_speech_partial').map((event) => event.text),
+    ['Como', 'Como resolvo esse problema']);
   assert.deepEqual(app.prompts, []);
   for (let frame = 0; frame < 20; frame++) app.engine.processPcmChunk(pcm(4000));
   app.engine.finishSpeechSegment();
   await tick();
-  assert.equal(calls, 2);
+  assert.equal(calls, 4, 'the final reuses the tail that already covered the whole utterance');
   assert.deepEqual(app.prompts, ['Como resolvo esse problema no servidor?']);
   assert.equal(app.events.filter((event) => event.type === 'pc_speech_transcribed').length, 1);
 });
@@ -105,32 +114,28 @@ test('stopping PC capture suppresses in-flight recognition and automatic respons
   assert.deepEqual(app.prompts, []);
 });
 
-test('a failed partial is not resurrected by the final tail', async () => {
-  let calls = 0;
-  const app = pipeline(async () => { calls++; return { error: 'Sem conexão' }; });
+test('a recognizer that keeps failing ends the utterance with one explicit error', async () => {
+  const app = pipeline(async () => ({ error: 'Sem conexão' }));
   for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
   await tick();
-  const failedId = app.events.find((event) => event.type === 'pc_speech_error').utteranceId;
-  for (let frame = 0; frame < 20; frame++) app.engine.processPcmChunk(pcm(4000));
+  assert.deepEqual(app.events.filter((event) => event.type === 'pc_speech_error'), [], 'the next tail may still succeed');
   app.engine.finishSpeechSegment();
   await tick();
-  assert.equal(app.events.filter((event) => event.type === 'pc_speech_error' && event.utteranceId === failedId).length, 1);
-  assert.ok(app.events.some((event) => event.type === 'pc_speech_end' && event.utteranceId === failedId && event.discarded));
+  const errors = app.events.filter((event) => event.type === 'pc_speech_error');
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].error, 'Sem conexão');
   assert.deepEqual(app.prompts, []);
 });
 
-test('audio after a failed window starts a new utterance instead of being dropped', async () => {
+test('a failed tail does not interrupt the utterance: the next one covers the same audio', async () => {
   let calls = 0;
   const app = pipeline(async () => (++calls === 1 ? { error: 'Sem conexão' } : { text: 'Qual é a sua experiência?' }));
   for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
   await tick();
-  // The speaker never pauses: without a restart, everything below is lost.
-  for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
-  await tick();
   app.engine.finishSpeechSegment();
   await tick();
-  const starts = app.events.filter((event) => event.type === 'pc_speech_start');
-  assert.equal(starts.length, 2);
+  assert.equal(app.events.filter((event) => event.type === 'pc_speech_start').length, 1);
+  assert.deepEqual(app.events.filter((event) => event.type === 'pc_speech_error'), []);
   assert.deepEqual(app.prompts, ['Qual é a sua experiência?']);
 });
 
@@ -158,7 +163,7 @@ test('manual mode still transcribes live without automatically invoking the agen
   assert.deepEqual(app.prompts, []);
 });
 
-test('consecutive turns preserve recognition order and capture language per utterance', async () => {
+test('consecutive turns are recognized concurrently, announced in order, each in its own language', async () => {
   const engine = new SystemAudioEngine();
   const requests = [];
   const finals = [];
@@ -172,24 +177,17 @@ test('consecutive turns preserve recognition order and capture language per utte
   language = 'en-US';
   engine.emit('speech_segment', { utteranceId: 'b', sequence: 0, wavBuffer: Buffer.alloc(44), durationSec: 1 });
   await tick();
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].lang, 'pt-BR');
-  requests[0].resolve({ text: 'Primeira fala' });
-  await tick();
-  assert.equal(requests.length, 2);
-  assert.equal(requests[1].lang, 'en-US');
+  assert.deepEqual(requests.map((request) => request.lang), ['pt-BR', 'en-US']);
   requests[1].resolve({ text: 'Second turn' });
+  await tick();
+  assert.deepEqual(finals, [], 'the second turn waits for the first');
+  requests[0].resolve({ text: 'Primeira fala' });
   await tick();
   assert.deepEqual(finals, ['Primeira fala', 'Second turn']);
 });
 
-test('an unrecognized short window recovers with adjacent audio instead of rejecting the whole PC phrase', async () => {
-  const app = pipeline(async (wav) => {
-    const duration = (wav.length - 44) / 32000;
-    return duration >= 3.9
-      ? { text: 'Como resolvo esse problema no servidor?' }
-      : { error: 'Não foi possível entender o áudio', code: 'unrecognized' };
-  });
+test('unrecognized short tails do not reject the phrase once more audio is heard', async () => {
+  const app = pipeline(bySeconds({ 3.9: { text: 'Como resolvo esse problema no servidor?' } }));
   for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
   await tick();
   for (let frame = 0; frame < 20; frame++) app.engine.processPcmChunk(pcm(4000));
@@ -199,24 +197,17 @@ test('an unrecognized short window recovers with adjacent audio instead of rejec
   assert.deepEqual(app.prompts, ['Como resolvo esse problema no servidor?']);
 });
 
-test('an unrecognized final tail is retried with the previous window without repeating partial text', async () => {
-  const lengths = [];
-  const app = pipeline(async (wav) => {
-    const duration = (wav.length - 44) / 32000;
-    lengths.push(duration);
-    if (duration >= 3.9) return { text: 'Como resolvo esse problema no servidor?' };
-    if (duration === 2) return { text: 'Como resolvo esse problema' };
-    return { error: 'Não foi possível entender o áudio', code: 'unrecognized' };
-  });
-  for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
-  await tick();
-  assert.equal(app.events.at(-1).type, 'pc_speech_partial');
-  assert.deepEqual(app.prompts, []);
-  for (let frame = 0; frame < 20; frame++) app.engine.processPcmChunk(pcm(4000));
+test('an unrecognized newer tail keeps the words already recognized', async () => {
+  const app = pipeline(bySeconds({ 1: { text: 'Como' }, 2: { text: 'Como resolvo esse problema' }, 3: { error: 'x', code: 'unrecognized' } }));
+  for (let frame = 0; frame < 80; frame++) {
+    app.engine.processPcmChunk(pcm(4000));
+    await tick();
+  }
   app.engine.finishSpeechSegment();
   await tick();
-  assert.deepEqual(lengths, [2, 2.8, 4]);
-  assert.deepEqual(app.prompts, ['Como resolvo esse problema no servidor?']);
+  assert.deepEqual(app.events.filter((event) => event.type === 'pc_speech_partial').map((event) => event.text),
+    ['Como', 'Como resolvo esse problema']);
+  assert.deepEqual(app.prompts, ['Como resolvo esse problema']);
   assert.equal(app.events.filter((event) => event.type === 'pc_speech_error').length, 0);
 });
 
@@ -239,7 +230,7 @@ test('unrecognized audio stays bounded and cannot produce an incomplete agent pr
   assert.deepEqual(app.prompts, []);
 });
 
-test('stopping capture while waiting for context discards the held audio', async () => {
+test('stopping capture discards unrecognized audio without an error or a prompt', async () => {
   let calls = 0;
   const app = pipeline(async () => {
     calls++;
@@ -247,10 +238,10 @@ test('stopping capture while waiting for context discards the held audio', async
   });
   for (let frame = 0; frame < 60; frame++) app.engine.processPcmChunk(pcm(4000));
   await tick();
-  assert.equal(app.events.filter((event) => event.type === 'pc_speech_error').length, 0);
   app.engine.stopCapture();
   await tick();
-  assert.equal(calls, 1);
+  assert.equal(calls, 3);
+  assert.equal(app.events.filter((event) => event.type === 'pc_speech_error').length, 0);
   assert.deepEqual(app.prompts, []);
 });
 
@@ -270,12 +261,38 @@ test('PC speech detects the language per utterance', async () => {
     onFinal: () => {},
   });
   const header = Buffer.alloc(44);
-  const window = (utteranceId, sequence, final) => ({ wavBuffer: Buffer.concat([header, pcm(500)]), utteranceId, sequence, overlapBytes: 0 , final });
+  // Two seconds of speech: enough words for the language to be decided.
+  const window = (utteranceId, sequence, final) => ({ wavBuffer: Buffer.concat([header, pcm(500)]), utteranceId, sequence, durationMs: 2000, final });
   engine.emit('speech_chunk', window('a', 0, false));
+  await tick();
   engine.emit('speech_segment', { ...window('a', 1), durationSec: 1 });
   await tick(); await tick(); await tick();
   engine.emit('speech_segment', { ...window('b', 0), durationSec: 1 });
   await tick(); await tick(); await tick();
   assert.deepEqual(requests, ['pt-BR,en-US', 'en-US', 'en-US,pt-BR']);
   assert.deepEqual(events.filter((event) => event.type === 'pc_speech_transcribed').map((event) => event.language), ['en-US', 'pt-BR']);
+});
+
+test('partials reach the screen as they come and the live responder at a steady pace', async () => {
+  const engine = new SystemAudioEngine();
+  const screen = [];
+  const responder = [];
+  let calls = 0;
+  const texts = ['Como', 'Como você organiza o', 'Como você organiza o cache', 'Como você organiza o cache quando', 'Como você organiza o cache quando escala?'];
+  const transcription = wirePcTranscription(engine, {
+    transcribe: async () => ({ text: texts[calls++] }),
+    getLanguage: () => 'pt-BR', copilotPartialMs: 60,
+    broadcast: (event) => { if (event.type === 'pc_speech_partial') screen.push(event.text); },
+    onPartial: (text) => responder.push(text), onFinal() {},
+  });
+  const send = (sequence, extra = {}) => engine.emit('speech_chunk', { utteranceId: 'a', kind: 'tail', segment: 0, sequence, wavBuffer: Buffer.alloc(46), ...extra });
+  for (let sequence = 0; sequence < 4; sequence++) { send(sequence); await tick(); }
+  assert.deepEqual(screen, texts.slice(0, 4));
+  assert.deepEqual(responder, ['Como', 'Como você organiza o'], 'a short partial does not start the pacing window');
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.deepEqual(responder.slice(2), ['Como você organiza o cache quando'], 'only the latest text is sent when the window ends');
+  send(4, { pause: true });
+  await tick();
+  assert.equal(responder.at(-1), 'Como você organiza o cache quando escala?', 'a pause is never held back');
+  transcription.cancel();
 });
