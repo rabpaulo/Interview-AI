@@ -4,7 +4,7 @@ Este documento descreve o fluxo atual. Com Antigravity ou um provedor por API ke
 
 ## Da captura à resposta
 
-1. O PC envia a primeira janela de áudio ao reconhecimento após cerca de 2 segundos. As próximas janelas, assim como as do microfone, usam aproximadamente 3 segundos, com 800 ms de sobreposição.
+1. Com uma key da Deepgram, o áudio do PC é enviado em tempo real e o texto cresce palavra por palavra (veja "Transcrição em tempo real"). Sem key, o PC envia a primeira janela de áudio ao reconhecimento após cerca de 2 segundos. As próximas janelas, assim como as do microfone, usam aproximadamente 3 segundos, com 800 ms de sobreposição.
 2. O texto parcial aparece na interface. Com Antigravity ou API key, um parcial com pelo menos 4 palavras inicia uma prévia no modo automático (veja "Prévias durante a fala").
 3. Após 300 ms de pausa, o reconhecimento do trecho pendente pode começar. A fala continua aberta até completar 900 ms de silêncio.
 4. Se o áudio voltar antes disso, os trechos continuam na mesma fala. Caso contrário, o app consolida a transcrição após concluir os pedidos de reconhecimento pendentes.
@@ -25,6 +25,38 @@ O copiloto mantém uma geração automática por vez. Se o modelo ficar para tr�
 Antigravity, Codex e Claude Code preparam e reutilizam sessões de processo. A preparação não envia uma pergunta. Cancelar uma resposta ou um erro durante a geração encerra o processo; o app inicia o substituto em seguida, com a mesma conversa, para que a próxima pergunta não espere o CLI iniciar. Reset e mudança de configuração preparam uma nova sessão.
 
 Os CLIs rodam numa pasta vazia (`interviewai-agent` no diretório temporário do sistema), fora do projeto, para não carregar repositório, AGENTS.md ou CLAUDE.md. O Claude Code roda sem ferramentas, servidores MCP, plugins e skills, e o Claude Code e o Codex usam um system prompt curto no lugar do prompt de agente de código. O Antigravity desativa a expansão de comandos e skills; ele mantém as ferramentas, pois abre as capturas de tela como arquivos.
+
+## Transcrição em tempo real
+
+O reconhecimento gratuito (`server/transcribe.py`, o reconhecedor web do Google) só aceita arquivos inteiros: cada janela de 3 s abre um processo Python e a transcrição avança aos saltos. Para a barra de transcrição acompanhar a fala como no Perssua, o app aceita um serviço de streaming opcional. A key é salva em **Chaves de API → Transcrição em tempo real**, ou lida de `DEEPGRAM_API_KEY`.
+
+Opções comparadas em 16 de outubro de 2026, com preços públicos (sujeitos a mudança):
+
+| Serviço | Parciais durante a fala | pt-BR e en-US na mesma fala | Custo | Observação |
+| --- | --- | --- | ---: | --- |
+| **Deepgram Nova-3** (escolhido) | Sim, resultados intermediários a cada poucas centenas de ms | Sim (`language=multi`, idioma por palavra) | ~US$ 0,008–0,009/min de áudio | Cobrança por segundo de áudio; US$ 200 de crédito inicial |
+| AssemblyAI Universal-Streaming | Sim | Sim (modelo multilíngue) | US$ 0,15/h | Cobra o tempo de conexão aberta, o que encarece manter uma conexão pronta |
+| OpenAI `gpt-live-transcribe` | Sim | Dicas de idioma, sem lista publicada | US$ 0,017/min | Reaproveitaria a key da OpenAI, mas custa o dobro e o protocolo é recente |
+| Gemini Live (transcrição da entrada) | Em blocos | Sim | Tokens de áudio do modelo | Sessão de conversa, não um serviço de transcrição |
+
+Uma hora de entrevista tem, em geral, bem menos de uma hora de fala do interlocutor; com a Deepgram, isso fica abaixo de US$ 0,55.
+
+Como funciona (`server/deepgram-transcriber.js`):
+
+- O detector de voz do app continua decidindo onde uma fala começa e termina. Cada fala abre uma conexão própria com a Deepgram e envia todo o PCM, incluindo os 200 ms anteriores e a pausa final.
+- Uma conexão reserva é aberta ao iniciar a captura e mantida com `KeepAlive`, para a primeira palavra não esperar o handshake TLS/WebSocket. Ao começar uma fala, ela é usada e outra é aberta. Mudar o idioma abre a reserva no novo idioma.
+- No modo automático, o pedido usa `language=multi`; o idioma da fala é o da maioria das palavras, e o empate fica com o idioma ouvido por último. Com pt-BR ou en-US fixo, esse idioma é enviado.
+- Depois dos 900 ms de silêncio, o app envia `Finalize`, espera o resultado final (até 1,5 s) e emite a mesma transcrição consolidada de antes.
+- Os parciais chegam à tela imediatamente. O copiloto recebe um parcial com 4 ou mais palavras no máximo a cada 2 s, exceto quando a Deepgram detecta uma pausa (`speech_final`), que é enviada na hora. Sem esse ritmo, cada palavra reiniciaria a prévia e nenhuma terminaria: o Antigravity leva de 2 a 4 s até o primeiro texto e cada prévia cancelada custa um processo.
+- Se a conexão falhar no meio de uma fala, o áudio dela já está guardado: ao fim da fala, uma única requisição ao reconhecimento gratuito produz a transcrição, sem parciais. Uma falha ao conectar desliga o streaming por 30 s; uma key recusada o desliga até a key mudar. Nesses casos, as falas usam as janelas de 3 s, como sem key.
+
+Para medir com uma gravação real (consome créditos da Deepgram):
+
+```bash
+node scripts/measure-transcription-latency.js gravacao.wav auto
+```
+
+O script envia o áudio em ritmo real, em quadros de 50 ms como a captura, e mostra o tempo de conexão, o primeiro parcial, o atraso mediano e p95 entre o fim de cada trecho de áudio e o texto correspondente, e o tempo do resultado final após `Finalize`. A meta é atraso mediano abaixo de 500 ms. Os testes usam um servidor WebSocket local no lugar da Deepgram e validam o encadeamento (primeira palavra na tela em menos de 500 ms), não a rede nem o serviço real; esse valor ainda não foi medido com uma key.
 
 ## Prévias durante a fala
 
@@ -87,9 +119,10 @@ Um teste com relógio controlado e reconhecimento simulado de 400 ms verifica qu
 | --- | --- |
 | Nenhuma transcrição do PC | Estado da captura, saída padrão de áudio, pactl e parec. |
 | Erro ou demora no reconhecimento | Python com SpeechRecognition, acesso à internet, volume e ruído do áudio. |
+| Transcrição volta a avançar em blocos de 3 s com key da Deepgram | Estado da key em Chaves de API e o log `[Deepgram]` do backend: key recusada ou falha de conexão (o streaming volta após 30 s). |
 | Transcrição termina no meio da pergunta | Pausas de 900 ms ou falha de reconhecimento; compare o texto com o áudio ouvido. |
 | Texto pronto, mas resposta demora | Preparação do CLI, pedidos anteriores e tempo de geração do modelo. |
 | Resposta genérica ou sem fatos pessoais | Contexto salvo e persona selecionada; mensagens diretas não anexam o contexto do copiloto. |
 | Mudança de backend não aparece | Processo antigo reaproveitado na porta 3001; reinicie esse backend. |
 
-Os testes relevantes estão em `server/response-latency.test.js`, `server/live-copilot.test.js`, `server/pc-live-integration.test.js` e `shared/streaming-transcription.test.js`. Execute-os pela suíte `npm test` ou individualmente com `node --test`.
+Os testes relevantes estão em `server/response-latency.test.js`, `server/live-copilot.test.js`, `server/pc-live-integration.test.js`, `server/pc-streaming.test.js`, `server/deepgram-transcriber.test.js` e `shared/streaming-transcription.test.js`. Execute-os pela suíte `npm test` ou individualmente com `node --test`.

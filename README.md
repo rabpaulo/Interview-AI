@@ -4,6 +4,7 @@ Copiloto desktop para entrevistas e reuniões, com transcrição de áudio e sug
 
 - Captura do áudio do PC (Linux e Windows) e gravação pelo microfone.
 - Transcrição durante a fala; respostas automáticas após sua consolidação.
+- Transcrição do PC palavra por palavra com uma key da Deepgram (opcional; sem ela, o reconhecimento gratuito atualiza a cada ~3 s).
 - **Importe seu currículo** (PDF, DOCX, TXT ou MD) arrastando o arquivo: a IA preenche perfil, tecnologias e experiências.
 - **Contexto da vaga e da empresa**: produtos, stack e requisitos, importados da descrição da vaga ou escritos à mão, para respostas ligadas à entrevista daquele dia.
 - Sugestões em tom profissional e conversacional, com contexto pessoal editável.
