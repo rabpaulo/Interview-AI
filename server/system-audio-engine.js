@@ -20,7 +20,6 @@ export function defaultAudioSource(env = process.env, platform = process.platfor
  * Emits:
  * - 'level': { level: number (0-100), rms: number } (emitted ~30 times/sec)
  * - 'speech_start': { utteranceId, timestamp }
- * - 'speech_audio': { utteranceId, pcm } (every PCM frame of an utterance, for streaming recognition)
  * - 'speech_chunk': { utteranceId, wavBuffer, sequence } (while speaking)
  * - 'speech_segment': { wavBuffer: Buffer, durationSec: number }
  * - 'status': { isCapturing: boolean, sink: string }
@@ -323,14 +322,12 @@ export class SystemAudioEngine extends EventEmitter {
         }, { firstChunkMs: 2000 });
         this.speechChunker.push(leadIn, false);
         this.emit('speech_start', { utteranceId, timestamp: now });
-        if (leadIn.length) this.emit('speech_audio', { utteranceId, pcm: leadIn });
         console.log(`[SystemAudio] 🎙️ Speech detected from PC (level: ${normalizedLevel}%)`);
       }
       this.speechVoicedMs += chunkDurationMs;
       this.trailingSilenceBytes = 0;
       this.flushedSilenceBytes = 0;
       this.speechTotalBytes += chunk.length;
-      this.emit('speech_audio', { utteranceId: this.utteranceId, pcm: chunk });
       this.speechChunker.push(chunk, this.speechVoicedMs >= this.minSpeechMs);
       this.lastVoiceDetectedTime = now + chunkDurationMs;
 
@@ -344,8 +341,6 @@ export class SystemAudioEngine extends EventEmitter {
       if (this.inSpeech) {
         this.speechTotalBytes += chunk.length;
         this.trailingSilenceBytes += chunk.length;
-        // Streaming recognizers need the pause too: it is how they settle the last words.
-        this.emit('speech_audio', { utteranceId: this.utteranceId, pcm: chunk });
         this.speechChunker.push(chunk, false);
 
         if (!this.silenceTimer) {

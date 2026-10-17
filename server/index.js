@@ -25,9 +25,7 @@ import { AVAILABLE_MODELS, AVAILABLE_PERSONAS, generateCopilotResponse } from '.
 import { AUTO_LANGUAGE, LANGUAGES } from '../shared/language.js';
 import { unavailableReason } from '../shared/provider-availability.js';
 import { createProviderAvailability } from './provider-availability.js';
-import { providerKeys, isKeyProvider } from './provider-keys.js';
-import { createDeepgramTranscriber } from './deepgram-transcriber.js';
-import { isSpeechProvider } from '../shared/speech-providers.js';
+import { providerKeys } from './provider-keys.js';
 import { resetApiConversations } from './api-session.js';
 import { API_PROVIDER_IDS, isApiProvider } from '../shared/api-providers.js';
 
@@ -319,13 +317,8 @@ function archiveSession() {
     });
 }
 
-// Optional: with a Deepgram key the PC transcript streams word by word.
-const liveTranscriber = createDeepgramTranscriber({ getKey: () => providerKeys.get('deepgram') });
-liveTranscriber.verify();
-
 const pcTranscription = wirePcTranscription(systemAudioEngine, {
   transcribe: transcribeAudioBuffer,
-  live: liveTranscriber,
   getLanguage: () => activeLanguage,
   broadcast,
   onPartial: (text, id) => {
@@ -595,44 +588,38 @@ app.get('/api/notes/search', (req, res) => {
 
 // API keys: the client sends a key once and only ever gets back whether one exists.
 function keysResponse() {
-  return { keys: providerKeys.summary(), file: providerKeys.file, transcription: { deepgram: liveTranscriber.status() } };
+  return { keys: providerKeys.summary(), file: providerKeys.file };
 }
 
 // A new key changes what the provider, and OpenCode with it, can offer.
-async function refreshForKeys(provider) {
-  if (isSpeechProvider(provider)) {
-    liveTranscriber.reset();
-    await liveTranscriber.verify();
-    if (systemAudioEngine.isCapturing) liveTranscriber.warm(activeLanguage);
-    return;
-  }
+function refreshForKeys(provider) {
   providerAvailability.refresh(provider, { force: true });
   providerAvailability.refresh('opencode', { force: true });
 }
 
 app.get('/api/provider-keys', (req, res) => res.json(keysResponse()));
 
-app.put('/api/provider-keys/:provider', async (req, res) => {
+app.put('/api/provider-keys/:provider', (req, res) => {
   const { provider } = req.params;
-  if (!isKeyProvider(provider)) return res.status(404).json({ error: 'Provedor desconhecido.' });
+  if (!isApiProvider(provider)) return res.status(404).json({ error: 'Provedor desconhecido.' });
   try {
     providerKeys.set(provider, req.body?.key);
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
-  await refreshForKeys(provider);
+  refreshForKeys(provider);
   res.json(keysResponse());
 });
 
-app.delete('/api/provider-keys/:provider', async (req, res) => {
+app.delete('/api/provider-keys/:provider', (req, res) => {
   const { provider } = req.params;
-  if (!isKeyProvider(provider)) return res.status(404).json({ error: 'Provedor desconhecido.' });
+  if (!isApiProvider(provider)) return res.status(404).json({ error: 'Provedor desconhecido.' });
   try {
     providerKeys.remove(provider);
   } catch (error) {
     return res.status(500).json({ error: `Não foi possível remover a key: ${error.message}` });
   }
-  await refreshForKeys(provider);
+  refreshForKeys(provider);
   res.json(keysResponse());
 });
 
@@ -946,8 +933,6 @@ function handleClientMessage(ws, data) {
 
   if (type === 'set_language') {
     if (data.language === AUTO_LANGUAGE || LANGUAGES.includes(data.language)) activeLanguage = data.language;
-    // The spare streaming connection is opened for one language.
-    if (systemAudioEngine.isCapturing) liveTranscriber.warm(activeLanguage);
     return;
   }
 

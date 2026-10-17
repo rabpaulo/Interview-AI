@@ -16,14 +16,12 @@ async function requestKeys(path = '', method = 'GET', body) {
 export function useProviderKeys(isOpen) {
   const [keys, setKeys] = useState({});
   const [file, setFile] = useState('');
-  const [transcription, setTranscription] = useState({});
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState('');
 
   const apply = (result) => {
     setKeys(result.keys || {});
     setFile(result.file || '');
-    setTranscription(result.transcription || {});
   };
 
   useEffect(() => {
@@ -49,5 +47,5 @@ export function useProviderKeys(isOpen) {
   const save = useCallback((provider, key) => run(provider, () => requestKeys(`/${provider}`, 'PUT', { key })), [run]);
   const remove = useCallback((provider) => run(provider, () => requestKeys(`/${provider}`, 'DELETE')), [run]);
 
-  return { keys, file, transcription, busy, error, save, remove };
+  return { keys, file, busy, error, save, remove };
 }

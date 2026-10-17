@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, KeyRound, ExternalLink, Trash2, Check, Loader2 } from 'lucide-react';
 import { API_PROVIDER_LIST } from '../config/models.js';
-import { SPEECH_PROVIDER_LIST } from '../../shared/speech-providers.js';
 import { useProviderKeys } from '../hooks/useProviderKeys.js';
 
 function statusOf(entry, key) {
@@ -77,7 +76,7 @@ function KeyRow({ provider, keyInfo, entry, busy, onSave, onRemove }) {
 }
 
 export function ApiKeysModal({ isOpen, onClose, availability = {} }) {
-  const { keys, file, transcription, busy, error, save, remove } = useProviderKeys(isOpen);
+  const { keys, file, busy, error, save, remove } = useProviderKeys(isOpen);
   if (!isOpen) return null;
 
   return (
@@ -106,22 +105,6 @@ export function ApiKeysModal({ isOpen, onClose, availability = {} }) {
               provider={provider}
               keyInfo={keys[provider.id]}
               entry={availability[provider.id]}
-              busy={busy === provider.id}
-              onSave={save}
-              onRemove={remove}
-            />
-          ))}
-          <h3 className="pt-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Transcrição em tempo real</h3>
-          <p className="text-zinc-400 leading-relaxed">
-            Com uma key da Deepgram, a fala do PC aparece palavra por palavra, em vez de a cada 3 segundos.
-            Sem key, ou se o serviço falhar, o reconhecimento gratuito continua sendo usado.
-          </p>
-          {SPEECH_PROVIDER_LIST.map((provider) => (
-            <KeyRow
-              key={provider.id}
-              provider={provider}
-              keyInfo={keys[provider.id]}
-              entry={transcription[provider.id]}
               busy={busy === provider.id}
               onSave={save}
               onRemove={remove}

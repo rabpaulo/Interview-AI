@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { API_PROVIDERS, isApiProvider } from '../shared/api-providers.js';
-import { SPEECH_PROVIDERS, isSpeechProvider } from '../shared/speech-providers.js';
 import { defaultProfilePath } from './profile-store.js';
 
 // API keys saved in the app live next to the profile, readable only by the user.
@@ -12,15 +11,12 @@ export function defaultKeysPath(env = process.env) {
 }
 
 const MAX_KEY_LENGTH = 400;
-// Chat providers and the streaming transcription service keep their keys together.
-const KEY_PROVIDERS = { ...API_PROVIDERS, ...SPEECH_PROVIDERS };
-export const isKeyProvider = (id) => isApiProvider(id) || isSpeechProvider(id);
 
 export function createProviderKeys({ file = defaultKeysPath(), env = process.env } = {}) {
   let saved = {};
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8')).keys || {};
-    saved = Object.fromEntries(Object.entries(parsed).filter(([id, key]) => isKeyProvider(id) && typeof key === 'string' && key));
+    saved = Object.fromEntries(Object.entries(parsed).filter(([id, key]) => isApiProvider(id) && typeof key === 'string' && key));
   } catch (error) {
     if (error.code !== 'ENOENT') console.warn(`[Keys] Could not read ${file}: ${error.message}`);
   }
@@ -33,17 +29,17 @@ export function createProviderKeys({ file = defaultKeysPath(), env = process.env
     fs.renameSync(temp, file);
   }
 
-  const envKey = (provider) => KEY_PROVIDERS[provider].env.map((name) => env[name]).find(Boolean) || null;
+  const envKey = (provider) => API_PROVIDERS[provider].env.map((name) => env[name]).find(Boolean) || null;
 
   return {
     file,
     /** The key a request uses: the saved one, then the environment. */
     get(provider) {
-      if (!isKeyProvider(provider)) return null;
+      if (!isApiProvider(provider)) return null;
       return saved[provider] || envKey(provider);
     },
     set(provider, key) {
-      if (!isKeyProvider(provider)) throw new Error('Provedor desconhecido.');
+      if (!isApiProvider(provider)) throw new Error('Provedor desconhecido.');
       const value = typeof key === 'string' ? key.trim() : '';
       if (!value) throw new Error('Informe a API key.');
       if (value.length > MAX_KEY_LENGTH || /\s/.test(value)) throw new Error('A API key não parece válida.');
@@ -58,7 +54,7 @@ export function createProviderKeys({ file = defaultKeysPath(), env = process.env
     },
     /** What the client may see: where each key comes from and its last characters. */
     summary() {
-      return Object.fromEntries(Object.keys(KEY_PROVIDERS).map((provider) => {
+      return Object.fromEntries(Object.keys(API_PROVIDERS).map((provider) => {
         const key = this.get(provider);
         const source = saved[provider] ? 'saved' : key ? 'env' : null;
         return [provider, { configured: Boolean(key), source, hint: key ? `…${key.slice(-4)}` : null }];
